@@ -22,3 +22,25 @@ for (const file of readdirSync("fixtures/v1").filter(name => name.endsWith(".jso
     }
   });
 }
+
+test("shared cases run with each consumer's options and tool schemas", async () => {
+  const data = JSON.parse(readFileSync("test/schema-samples.json", "utf8")) as { rows: { name: string; schema: Record<string, unknown> }[] };
+  const recordedTools = (file: string) => {
+    const cases = readFileSync(`fixtures/v1/${file}.jsonl`, "utf8").trim().split("\n").map(line => JSON.parse(line));
+    return cases.find(item => item.tools?.length)?.tools as ServeOptions["tools"];
+  };
+  const schemas = (prefix: string) => data.rows.filter(row => row.name.startsWith(`${prefix}:`)).map(row => ({ name: row.name.slice(prefix.length + 1), description: "", inputSchema: row.schema }));
+  const copies = [
+    { name: "amem", tools: recordedTools("agent-mem"), frameBytes: 65_536, resultBytes: 262_144 },
+    { name: "vault-mem", tools: schemas("vault"), frameBytes: 65_536, resultBytes: 262_144, instructions: "fixture instructions", toolFrameBytes: (name: string) => name.startsWith("vmem_proposal_") || ["vmem_assert", "vmem_assertions", "vmem_assertions_purge", "vmem_assertions_exposure"].includes(name) ? 48 * 1024 : undefined },
+    { name: "agent-research", tools: schemas("research"), frameBytes: 131_072, resultBytes: 2_097_152 },
+    { name: "adec", tools: recordedTools("agent-decide"), frameBytes: 1_048_576, resultBytes: 262_144 },
+  ];
+  for (const copy of copies) {
+    const results = await runTranscripts({ name: copy.name, version: "fixture", tools: copy.tools, handlers: {}, instructions: copy.instructions,
+      limits: { frameBytes: copy.frameBytes, resultBytes: copy.resultBytes, toolFrameBytes: copy.toolFrameBytes },
+      failureText: error => error instanceof ResultTooLarge ? "result limit" : (error as { code?: string }).code === "candidate_queue_full" ? "queue full" : undefined,
+    });
+    for (const result of results) expect(result.actual, `${copy.name}:${result.id}`).toBe(result.expected);
+  }
+});

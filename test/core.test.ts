@@ -67,3 +67,19 @@ test("consumer schemas preserve recorded validator samples", async () => {
   const { samples, rows } = await Bun.file("test/schema-samples.json").json() as { samples: unknown[]; rows: { name: string; schema: unknown; results: boolean[] }[] };
   for (const row of rows) expect(samples.map(sample => validArguments(row.name.startsWith("agent-mem:") ? sample ?? {} : sample, row.schema)), row.name).toEqual(row.results);
 });
+
+test("shared conformance uses consumer tools for protocol and fixture handlers for calls", async () => {
+  const { runTranscripts, ResultTooLarge } = await import("../src/index.ts");
+  const observed: string[] = [];
+  const results = await runTranscripts({
+    name: "consumer", version: "2", instructions: "fixture instructions",
+    tools: [{ name: "special", description: "real tool", inputSchema: { type: "object" } }],
+    handlers: { special: () => { throw Error("notification invoked a handler"); } },
+    limits: { frameBytes: 1024, resultBytes: 128, toolFrameBytes: name => name === "special" ? 512 : undefined },
+    failureText: error => error instanceof ResultTooLarge ? "limited" : (error as { code?: string }).code === "candidate_queue_full" ? "queue full" : undefined,
+    onEmitted: name => { observed.push(name); },
+  });
+  for (const result of results) expect(result.actual, result.id).toBe(result.expected);
+  expect(results.some(result => result.id === "tool-frame-bound")).toBe(true);
+  expect(observed).toEqual(["echo"]);
+});

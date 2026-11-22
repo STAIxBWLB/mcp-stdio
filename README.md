@@ -14,7 +14,7 @@ await serve({
 
 `serve` accepts `instructions`, input/output streams, a close callback and limits for frame bytes, result bytes, default string length and individual tool frame bytes. Defaults are 64 KiB, 256 KiB and 64 KiB respectively. `failureText` can map a thrown error or `ResultTooLarge` to a safe, content-free response; otherwise failures are opaque. `onEmitted` observes successful calls only after the output callback confirms the write.
 
-`validArguments(value, schema)` and `argumentError(value, schema)` validate the bounded schema vocabulary. `writeConfirmed(output, text)`, `PROTOCOL_VERSIONS`, `ERROR` and `ResultTooLarge` are also exported. `runTranscripts(cases, options)` replays recorded input/output streams against a consumer tool table and returns exact comparison results.
+`validArguments(value, schema)` and `argumentError(value, schema)` validate the bounded schema vocabulary. `writeConfirmed(output, text)`, `PROTOCOL_VERSIONS`, `ERROR` and `ResultTooLarge` are also exported. `runTranscripts(options)` runs the shared protocol cases against the consumer tool table and the handler-dependent cases with fixture tools, retaining the consumer options. `runTranscripts(cases, options)` replays recorded input/output streams and returns exact comparison results.
 
 To migrate a consumer, keep its tool definitions and handlers, pass its existing name, version, limits, instructions and safe failure mapping to `serve`, and remove its local loop and validator. Run the shared transcripts and preserve tests for the consumer's own tool behavior. Review `fixtures/v1/DIVERGENCES.md` and the strict initialization and validation contract before migrating.
 
