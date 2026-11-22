@@ -1,1 +1,3 @@
 node_modules/
+.agenthub/
+.worktrees/
