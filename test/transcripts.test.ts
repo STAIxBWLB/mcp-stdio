@@ -19,7 +19,7 @@ for (const file of readdirSync("fixtures/v1").filter(name => name.endsWith(".jso
       "amem": { frameBytes: 65_536, resultBytes: 262_144 },
       "vault-mem": { frameBytes: 65_536, resultBytes: 262_144 },
       "agent-research": { frameBytes: 131_072, resultBytes: 2_097_152 },
-      "adec": { frameBytes: 1_048_576, resultBytes: 262_144 },
+      "adec": { frameBytes: 1_048_576, resultBytes: Infinity },
     };
     const options = identity ? { ...base, name: identity[0], version: identity[1], limits: copyLimits[identity[0]] } : base;
     for (const item of cases) {
@@ -43,7 +43,7 @@ test("shared cases run with each consumer's options and tool schemas", async () 
     { name: "amem", tools: recordedTools("agent-mem"), frameBytes: 65_536, resultBytes: 262_144 },
     { name: "vault-mem", tools: schemas("vault"), frameBytes: 65_536, resultBytes: 262_144, instructions: "fixture instructions", toolFrameBytes: (name: string) => name.startsWith("vmem_proposal_") || ["vmem_assert", "vmem_assertions", "vmem_assertions_purge", "vmem_assertions_exposure"].includes(name) ? 48 * 1024 : undefined },
     { name: "agent-research", tools: schemas("research"), frameBytes: 131_072, resultBytes: 2_097_152 },
-    { name: "adec", tools: recordedTools("agent-decide"), frameBytes: 1_048_576, resultBytes: 262_144 },
+    { name: "adec", tools: recordedTools("agent-decide"), frameBytes: 1_048_576, resultBytes: Infinity },
   ];
   for (const copy of copies) {
     const results = await runTranscripts({ name: copy.name, version: "fixture", tools: copy.tools, handlers: Object.fromEntries(copy.tools.map(tool => [tool.name, () => ({})])), instructions: copy.instructions,

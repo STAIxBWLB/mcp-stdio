@@ -36,6 +36,8 @@ export async function runConformance(options: Omit<ServeOptions, "input" | "outp
   const cases: { item: TranscriptCase; options: Omit<ServeOptions, "input" | "output" | "close"> }[] = [];
   const add = (id: string, input: string | number[], output: string, selected = options) => cases.push({ item: { id, input, output }, options: selected });
   add("phases", request(2, "ping") + request(3, "tools/list") + ready + request(4, "ping") + request(5, "unknown"), response(2, {}) + err(3, -32002, "Initialize the session first") + initialized + response(4, {}) + err(5, -32601, "Method not found"));
+  add("reinitialize", ready + request(2, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: {} }), initialized + err(2, -32602, "Invalid initialization"));
+  add("invalid-call-params", ready + request(2, "tools/call", []), initialized + err(2, -32602, "Invalid tool call"));
   add("list", ready + request(2, "tools/list") + request(3, "tools/list", { cursor: "x" }), initialized + response(2, { tools: options.tools }) + err(3, -32602, "Invalid tool listing arguments"));
   add("invalid-id", ready + line({ jsonrpc: "2.0", id: null, method: "ping" }), initialized + err(null, -32600, "Invalid request id"));
   add("notification", ready + line({ jsonrpc: "2.0", method: "tools/call", params: { name: options.tools[0]?.name ?? "missing", arguments: {} } }) + request(2, "ping"), initialized + response(2, {}));
@@ -49,14 +51,16 @@ export async function runConformance(options: Omit<ServeOptions, "input" | "outp
   const fixtureNames = ["echo", "fail", "named", "large"];
   const tools = fixtureNames.map(name => ({ name, description: name, inputSchema: schema }));
   const failure = new Error("fixture failure"), named = { code: "candidate_queue_full" };
-  const fixtureOptions = { ...options, tools, handlers: { echo: (args: Record<string, unknown>) => args, fail: () => { throw failure; }, named: () => { throw named; }, large: () => "x".repeat(resultBytes + 1) } };
+  const fixtureOptions = { ...options, tools, handlers: { echo: (args: Record<string, unknown>) => args, fail: () => { throw failure; }, named: () => { throw named; }, large: () => "x".repeat(Number.isFinite(resultBytes) ? resultBytes + 1 : 262_145) } };
   const failureResult = (value: unknown) => {
     let text: string | undefined;
     try { text = options.failureText?.(value); } catch { /* same fallback as serve */ }
     return { isError: true, content: [{ type: "text", text: text ?? OPAQUE_FAILURE }] };
   };
   add("invalid-arguments", ready + request(2, "tools/call", { name: "echo", arguments: { text: 7 } }), initialized + err(2, -32602, "text: expected string"), fixtureOptions);
-  add("handler-failures", ready + request(2, "tools/call", { name: "fail" }) + request(3, "tools/call", { name: "named" }) + request(4, "tools/call", { name: "large" }), initialized + response(2, failureResult(failure)) + response(3, failureResult(named)) + response(4, failureResult(new ResultTooLarge(resultBytes))), fixtureOptions);
+  const oversizeInput = Number.isFinite(resultBytes) ? request(4, "tools/call", { name: "large" }) : "";
+  const oversizeOutput = Number.isFinite(resultBytes) ? response(4, failureResult(new ResultTooLarge(resultBytes))) : "";
+  add("handler-failures", ready + request(2, "tools/call", { name: "fail" }) + request(3, "tools/call", { name: "named" }) + oversizeInput, initialized + response(2, failureResult(failure)) + response(3, failureResult(named)) + oversizeOutput, fixtureOptions);
   add("emitted", ready + request(2, "tools/call", { name: "echo", arguments: {} }), initialized + response(2, { content: [{ type: "text", text: "{}" }] }), fixtureOptions);
   const boundedName = options.tools.find(tool => { const bound = options.limits?.toolFrameBytes?.(tool.name); return bound !== undefined && bound < frameBytes; })?.name;
   if (boundedName) {

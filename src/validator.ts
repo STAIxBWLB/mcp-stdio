@@ -85,4 +85,4 @@ export function argumentError(value: unknown, raw: unknown, path = "", defaultSt
   return undefined;
 }
 /** Boolean compatibility API for the same closed, bounded schema vocabulary. */
-export function validArguments(value: unknown, raw: unknown): boolean { return argumentError(value, raw) === undefined; }
+export function validArguments(value: unknown, raw: unknown, defaultStringLength = 65_536): boolean { return argumentError(value, raw, "", defaultStringLength) === undefined; }

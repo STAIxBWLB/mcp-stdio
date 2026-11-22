@@ -122,7 +122,7 @@ test("deep arguments and unexpected request failures do not end the session", as
   });
   const messages = output.trim().split("\n").map(row => JSON.parse(row));
   expect(messages.find(item => item.id === 2).error).toEqual({ code: -32602, message: "v: nested deeper than 64" });
-  expect(messages.find(item => item.id === 3).error).toEqual({ code: ERROR.INTERNAL_ERROR, message: "Internal error" });
+  expect(messages.find(item => item.id === 3).error).toEqual({ code: ERROR.INTERNAL_ERROR, message: "Internal error while handling the request; retry, and report it to the server maintainer if it persists" });
   expect(messages.find(item => item.id === 4).result).toEqual({});
   expect(output).not.toContain("private detail");
 });
@@ -141,4 +141,16 @@ test("confirmed write failure rejects and closes the server", async () => {
   expect(closed).toBe(true);
   expect(observed).toBe(false);
   expect(writes).toBe(2);
+});
+
+test("unbounded result limit preserves large successful results", async () => {
+  const { serve } = await import("../src/index.ts");
+  const line = (value: unknown) => JSON.stringify(value) + "\n";
+  const input = line({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: {} } }) + line({ jsonrpc: "2.0", method: "notifications/initialized" }) + line({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "large" } });
+  let output = "";
+  await serve({ name: "fixture", version: "1", input: Readable.from([input]), output: new Writable({ write(chunk, _encoding, callback) { output += chunk.toString(); callback(); } }), limits: { resultBytes: Infinity }, tools: [{ name: "large", description: "", inputSchema: { type: "object", additionalProperties: false } }], handlers: { large: () => "x".repeat(300_000) } });
+  const result = JSON.parse(output.trim().split("\n")[1]).result;
+  expect(result.isError).toBeUndefined();
+  expect(JSON.parse(result.content[0].text).length).toBe(300_000);
+  expect(validArguments("abcd", { type: "string" }, 3)).toBe(false);
 });

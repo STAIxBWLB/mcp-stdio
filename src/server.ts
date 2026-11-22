@@ -85,7 +85,7 @@ export async function serve(options: ServeOptions): Promise<void> {
         if (confirmedWriteFailed || output.destroyed || output.errored) throw failure;
         let id: string | number | null = null;
         try { const msg: unknown = JSON.parse(line); if (plain(msg) && (typeof msg.id === "string" && msg.id.length <= 200 || typeof msg.id === "number" && Number.isSafeInteger(msg.id))) id = msg.id as string | number; } catch { /* malformed requests have no usable id */ }
-        await error(id, ERROR.INTERNAL_ERROR, "Internal error");
+        await error(id, ERROR.INTERNAL_ERROR, "Internal error while handling the request; retry, and report it to the server maintainer if it persists");
       }
     }, async kind => {
       if (kind === "overflow") await error(null, ERROR.INVALID_REQUEST, `Request exceeds the ${frameBytes % 1024 === 0 ? `${frameBytes / 1024} KiB` : `${frameBytes} bytes`} frame bound`);

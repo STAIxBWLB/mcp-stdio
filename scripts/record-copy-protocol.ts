@@ -33,7 +33,7 @@ for (const copy of Object.keys(identities)) {
       else await original.serveMcp({ input: Readable.from([input]), output: stream, tools: [], handlers: {}, name, version });
     } catch (error) { originalError = error instanceof Error ? error.name : "unknown"; }
     const item: TranscriptCase = { id: `${copy}-protocol-${test.name}`, input: test.input, output };
-    const [result] = await runTranscripts([item], { name, version, tools: [], handlers: {} });
+    const [result] = await runTranscripts([item], { name, version, tools: [], handlers: {}, ...(copy === "agent-decide" ? { limits: { resultBytes: Infinity } } : {}) });
     const recorded = { ...item, ...(originalError ? { originalError } : {}), ...(!result.passed ? { packageOutput: result.actual } : {}) };
     recordings.push(recorded);
     if (!result.passed) {
