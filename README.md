@@ -1,0 +1,23 @@
+# @staix/mcp-stdio
+
+A zero-runtime-dependency MCP stdio server core for Bun 1.4.4 or later. Messages are newline-delimited JSON-RPC and requests are handled sequentially.
+
+```ts
+import { serve } from "@staix/mcp-stdio";
+
+await serve({
+  name: "example", version: "1.0.0",
+  tools: [{ name: "echo", description: "Return a message", inputSchema: { type: "object", properties: { message: { type: "string" } }, required: ["message"], additionalProperties: false } }],
+  handlers: { echo: args => args },
+});
+```
+
+`serve` accepts `instructions`, input/output streams, a close callback and limits for frame bytes, result bytes, default string length and individual tool frame bytes. Defaults are 64 KiB, 256 KiB and 64 KiB respectively. `failureText` can map a thrown error or `ResultTooLarge` to a safe, content-free response; otherwise failures are opaque. `onEmitted` observes successful calls only after the output callback confirms the write.
+
+`validArguments(value, schema)` and `argumentError(value, schema)` validate the bounded schema vocabulary. `writeConfirmed(output, text)`, `PROTOCOL_VERSIONS`, `ERROR` and `ResultTooLarge` are also exported. `runTranscripts(cases, options)` replays recorded input/output streams against a consumer tool table and returns exact comparison results.
+
+To migrate a consumer, keep its tool definitions and handlers, pass its existing name, version, limits, instructions and safe failure mapping to `serve`, and remove its local loop and validator. Run the shared transcripts and preserve tests for the consumer's own tool behavior. Review `fixtures/v1/DIVERGENCES.md` and the strict initialization and validation contract before migrating.
+
+Transcript changes and breaking API changes require a major version; new options or schema keywords a minor version; fixes a patch. Publishing uses npm trusted publishing, after registration and release consent.
+
+Each JSONL record contains an `id`, an input stream and its recorded output. A `packageOutput` field marks an intentional recorded divergence; the helper compares against that field when present. Consumer-specific recordings use the recorded tool table and frame limit for that case; the core cases use the fixture tools shown in the tests.
