@@ -37,7 +37,7 @@ test("shared cases run with each consumer's options and tool schemas", async () 
     { name: "adec", tools: recordedTools("agent-decide"), frameBytes: 1_048_576, resultBytes: 262_144 },
   ];
   for (const copy of copies) {
-    const results = await runTranscripts({ name: copy.name, version: "fixture", tools: copy.tools, handlers: {}, instructions: copy.instructions,
+    const results = await runTranscripts({ name: copy.name, version: "fixture", tools: copy.tools, handlers: Object.fromEntries(copy.tools.map(tool => [tool.name, () => ({})])), instructions: copy.instructions,
       limits: { frameBytes: copy.frameBytes, resultBytes: copy.resultBytes, toolFrameBytes: copy.toolFrameBytes },
       failureText: error => error instanceof ResultTooLarge ? "result limit" : (error as { code?: string }).code === "candidate_queue_full" ? "queue full" : undefined,
     });

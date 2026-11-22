@@ -57,7 +57,9 @@ export async function serve(options: ServeOptions): Promise<void> {
     if (bound !== undefined && Buffer.byteLength(line, "utf8") + 1 > bound) { await error(id, ERROR.INVALID_REQUEST, `${params.name} request exceeds ${bound % 1024 === 0 ? `${bound / 1024} KiB` : `${bound} bytes`} as the frame it was sent in; shorten the request or split the batch`); return; }
     const definition = options.tools.find(t => t.name === params.name), args = params.arguments ?? {};
     const handler = definition && Object.hasOwn(options.handlers, definition.name) ? options.handlers[definition.name] : undefined;
-    if (!definition || !handler || argumentError(args, definition.inputSchema, "", options.limits?.defaultStringLength) !== undefined) { await error(id, ERROR.INVALID_PARAMS, "Invalid tool name or arguments"); return; }
+    if (!definition || !handler) { await error(id, ERROR.INVALID_PARAMS, "Invalid tool name or arguments"); return; }
+    const invalid = argumentError(args, definition.inputSchema, "", options.limits?.defaultStringLength);
+    if (invalid) { await error(id, ERROR.INVALID_PARAMS, invalid); return; }
     let result: unknown, observedValue: unknown, succeeded = false;
     try {
       const value = await handler(args as Record<string, unknown>), text = JSON.stringify(value);

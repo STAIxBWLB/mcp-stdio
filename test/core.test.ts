@@ -96,3 +96,13 @@ test("exclusive minimum and unique arrays are enforced", () => {
   expect(validArguments(["a", "b"], schema)).toBe(true);
   expect(validArguments([{ a: 1, b: 2 }, { b: 2, a: 1 }], schema)).toBe(false);
 });
+
+test("invalid calls report the schema limit without echoing values", async () => {
+  const { runTranscripts } = await import("../src/index.ts");
+  const line = (value: unknown) => JSON.stringify(value) + "\n";
+  const input = line({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: {} } }) + line({ jsonrpc: "2.0", method: "notifications/initialized" }) + line({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "echo", arguments: { text: "secret" } } }) + line({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "missing" } });
+  const expected = line({ jsonrpc: "2.0", id: 1, result: { protocolVersion: "2025-06-18", capabilities: { tools: { listChanged: false } }, serverInfo: { name: "fixture", version: "1" } } }) + line({ jsonrpc: "2.0", id: 2, error: { code: -32602, message: "text: longer than 3" } }) + line({ jsonrpc: "2.0", id: 3, error: { code: -32602, message: "Invalid tool name or arguments" } });
+  const [result] = await runTranscripts([{ id: "limit", input, output: expected }], { name: "fixture", version: "1", tools: [{ name: "echo", description: "", inputSchema: { type: "object", properties: { text: { type: "string" } }, additionalProperties: false } }], handlers: { echo: () => ({}) }, limits: { defaultStringLength: 3 } });
+  expect(result.actual).toBe(expected);
+  expect(result.actual).not.toContain("secret");
+});

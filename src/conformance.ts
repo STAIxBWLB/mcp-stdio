@@ -42,8 +42,8 @@ export async function runConformance(options: Omit<ServeOptions, "input" | "outp
   add("overflow", "x".repeat(frameBytes + 1) + "\n" + request(2, "ping"), err(null, -32600, `Request exceeds the ${frameBytes / 1024} KiB frame bound`) + response(2, {}));
   add("invalid-utf8", [195], err(null, -32700, "Invalid UTF-8 input"));
   add("incomplete", "{", err(null, -32700, "Incomplete request at EOF"));
-  const objectTool = options.tools.find(tool => tool.inputSchema.type === "object");
-  if (objectTool) add("consumer-invalid-arguments", ready + request(2, "tools/call", { name: objectTool.name, arguments: [] }), initialized + err(2, -32602, "Invalid tool name or arguments"));
+  const objectTool = options.tools.find(tool => tool.inputSchema.type === "object" && Object.hasOwn(options.handlers, tool.name));
+  if (objectTool) add("consumer-invalid-arguments", ready + request(2, "tools/call", { name: objectTool.name, arguments: [] }), initialized + err(2, -32602, "arguments: expected object"));
   const schema = { type: "object", properties: { text: { type: "string" } }, additionalProperties: false };
   const fixtureNames = ["echo", "fail", "named", "large"];
   const tools = fixtureNames.map(name => ({ name, description: name, inputSchema: schema }));
@@ -54,7 +54,7 @@ export async function runConformance(options: Omit<ServeOptions, "input" | "outp
     try { text = options.failureText?.(value); } catch { /* same fallback as serve */ }
     return { isError: true, content: [{ type: "text", text: text ?? "Operation unavailable or refused; no partial result is shown." }] };
   };
-  add("invalid-arguments", ready + request(2, "tools/call", { name: "echo", arguments: { text: 7 } }), initialized + err(2, -32602, "Invalid tool name or arguments"), fixtureOptions);
+  add("invalid-arguments", ready + request(2, "tools/call", { name: "echo", arguments: { text: 7 } }), initialized + err(2, -32602, "text: expected string"), fixtureOptions);
   add("handler-failures", ready + request(2, "tools/call", { name: "fail" }) + request(3, "tools/call", { name: "named" }) + request(4, "tools/call", { name: "large" }), initialized + response(2, failureResult(failure)) + response(3, failureResult(named)) + response(4, failureResult(new ResultTooLarge(resultBytes))), fixtureOptions);
   add("emitted", ready + request(2, "tools/call", { name: "echo", arguments: {} }), initialized + response(2, { content: [{ type: "text", text: "{}" }] }), fixtureOptions);
   const boundedName = options.tools.find(tool => { const bound = options.limits?.toolFrameBytes?.(tool.name); return bound !== undefined && bound < frameBytes; })?.name;
