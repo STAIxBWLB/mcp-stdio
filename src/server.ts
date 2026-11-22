@@ -1,3 +1,4 @@
+import { OPAQUE_FAILURE } from "./messages.ts";
 import { once } from "node:events";
 import type { Readable, Writable } from "node:stream";
 import { readFrames } from "./framing.ts";
@@ -69,7 +70,7 @@ export async function serve(options: ServeOptions): Promise<void> {
     } catch (failure) {
       let text: string | undefined;
       try { text = options.failureText?.(failure); } catch { /* failure shaping cannot break the protocol */ }
-      result = { isError: true, content: [{ type: "text", text: text ?? "Operation unavailable or refused; no partial result is shown." }] };
+      result = { isError: true, content: [{ type: "text", text: text ?? OPAQUE_FAILURE }] };
     }
     if (succeeded && options.onEmitted) {
       await writeConfirmed(output, JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");

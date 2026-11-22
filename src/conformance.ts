@@ -1,3 +1,4 @@
+import { OPAQUE_FAILURE } from "./messages.ts";
 import { Readable, Writable } from "node:stream";
 import { serve, ResultTooLarge, type ServeOptions } from "./server.ts";
 
@@ -52,7 +53,7 @@ export async function runConformance(options: Omit<ServeOptions, "input" | "outp
   const failureResult = (value: unknown) => {
     let text: string | undefined;
     try { text = options.failureText?.(value); } catch { /* same fallback as serve */ }
-    return { isError: true, content: [{ type: "text", text: text ?? "Operation unavailable or refused; no partial result is shown." }] };
+    return { isError: true, content: [{ type: "text", text: text ?? OPAQUE_FAILURE }] };
   };
   add("invalid-arguments", ready + request(2, "tools/call", { name: "echo", arguments: { text: 7 } }), initialized + err(2, -32602, "text: expected string"), fixtureOptions);
   add("handler-failures", ready + request(2, "tools/call", { name: "fail" }) + request(3, "tools/call", { name: "named" }) + request(4, "tools/call", { name: "large" }), initialized + response(2, failureResult(failure)) + response(3, failureResult(named)) + response(4, failureResult(new ResultTooLarge(resultBytes))), fixtureOptions);
