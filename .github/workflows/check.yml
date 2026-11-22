@@ -16,5 +16,5 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test
-      - run: node -e 'const p = require("./package.json"); if (Object.keys(p.dependencies || {}).length || Object.keys(p.optionalDependencies || {}).length || Object.keys(p.peerDependencies || {}).length) throw new Error("runtime or peer dependencies are not allowed")'
+      - run: node -e 'const p = require("./package.json"); const found = ["dependencies", "optionalDependencies", "peerDependencies"].flatMap(section => Object.keys(p[section] || {}).map(key => `${section}.${key}`)); if (found.length) throw new Error(`runtime or peer dependencies are not allowed: ${found.join(", ")}; remove them from package.json`)'
       - run: bun scripts/check-pack.ts

@@ -126,3 +126,19 @@ test("deep arguments and unexpected request failures do not end the session", as
   expect(messages.find(item => item.id === 4).result).toEqual({});
   expect(output).not.toContain("private detail");
 });
+
+test("confirmed write failure rejects and closes the server", async () => {
+  const { serve } = await import("../src/index.ts");
+  const failure = Object.assign(new Error("write failed"), { code: "EPIPE" });
+  let writes = 0, closed = false, observed = false;
+  const output = new Writable({ write(_chunk, _encoding, callback) { writes++; callback(writes === 2 ? failure : undefined); } });
+  const line = (value: unknown) => JSON.stringify(value) + "\n";
+  const input = line({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: {} } }) + line({ jsonrpc: "2.0", method: "notifications/initialized" }) + line({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "echo", arguments: {} } });
+  await expect(serve({ name: "fixture", version: "1", input: Readable.from([input]), output,
+    tools: [{ name: "echo", description: "", inputSchema: { type: "object", additionalProperties: false } }],
+    handlers: { echo: () => ({ ok: true }) }, onEmitted: () => { observed = true; }, close: () => { closed = true; },
+  })).rejects.toBe(failure);
+  expect(closed).toBe(true);
+  expect(observed).toBe(false);
+  expect(writes).toBe(2);
+});

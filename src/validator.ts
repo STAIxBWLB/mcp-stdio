@@ -38,7 +38,7 @@ export function argumentError(value: unknown, raw: unknown, path = "", defaultSt
     return raw.oneOf.filter(branch => argumentError(value, branch, path, defaultStringLength, depth) === undefined).length === 1 ? undefined : fail("expected exactly one matching schema");
   }
   const allowed = ["type", "enum", "minLength", "maxLength", "pattern", "minimum", "maximum", "minItems", "maxItems", "items", "minProperties", "maxProperties", "required", "properties", "additionalProperties", "description", "title", "uniqueItems", "exclusiveMinimum"];
-  if (Object.keys(raw).some(key => !allowed.includes(key))) return fail("unknown schema keyword");
+  if (Object.keys(raw).some(key => !allowed.includes(key))) return fail("unknown schema keyword; use a supported keyword");
   const s = raw as Record<string, any>, type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
   const types: unknown[] = Array.isArray(s.type) ? s.type : [s.type];
   if (!types.includes(type) && !(type === "number" && Number.isSafeInteger(value) && types.includes("integer"))) return fail(`expected ${types.join(" or ")}`);

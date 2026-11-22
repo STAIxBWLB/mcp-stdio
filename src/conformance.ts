@@ -67,6 +67,11 @@ export async function runConformance(options: Omit<ServeOptions, "input" | "outp
     if (Buffer.byteLength(call) - 1 <= frameBytes) add("tool-frame-bound", ready + call, initialized + err(2, -32600, `${boundedName} request exceeds ${bound % 1024 === 0 ? `${bound / 1024} KiB` : `${bound} bytes`} as the frame it was sent in; shorten the request or split the batch`), boundedOptions);
   }
   const results: TranscriptResult[] = [];
-  for (const { item, options: selected } of cases) results.push(...await runTranscripts([item], selected));
+  for (const { item, options: selected } of cases) {
+    let observed = 0;
+    const current = item.id === "emitted" ? { ...selected, onEmitted: async (tool: string, id: string | number, value: unknown) => { observed++; await selected.onEmitted?.(tool, id, value); } } : selected;
+    results.push(...await runTranscripts([item], current));
+    if (item.id === "emitted") results.push({ id: "emitted-observation", expected: "1", actual: String(observed), passed: observed === 1 });
+  }
   return results;
 }

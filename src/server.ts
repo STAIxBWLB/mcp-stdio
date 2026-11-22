@@ -27,6 +27,7 @@ export async function serve(options: ServeOptions): Promise<void> {
   const input = options.input ?? process.stdin, output = options.output ?? process.stdout;
   const frameBytes = options.limits?.frameBytes ?? 65_536, resultBytes = options.limits?.resultBytes ?? 262_144;
   let phase: "new" | "initializing" | "ready" = "new";
+  let confirmedWriteFailed = false;
   const send = async (response: unknown) => { if (!output.write(JSON.stringify(response) + "\n")) await once(output, "drain"); };
   const error = (id: unknown, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
   const handle = async (line: string) => {
@@ -73,13 +74,15 @@ export async function serve(options: ServeOptions): Promise<void> {
       result = { isError: true, content: [{ type: "text", text: text ?? OPAQUE_FAILURE }] };
     }
     if (succeeded && options.onEmitted) {
-      await writeConfirmed(output, JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
+      try { await writeConfirmed(output, JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n"); }
+      catch (failure) { confirmedWriteFailed = true; throw failure; }
       try { await options.onEmitted(definition.name, id as string | number, observedValue); } catch { /* observation never changes the response */ }
     } else await send({ jsonrpc: "2.0", id, result });
   };
   try {
     await readFrames(input, frameBytes, async line => {
-      try { await handle(line); } catch {
+      try { await handle(line); } catch (failure) {
+        if (confirmedWriteFailed || output.destroyed || output.errored) throw failure;
         let id: string | number | null = null;
         try { const msg: unknown = JSON.parse(line); if (plain(msg) && (typeof msg.id === "string" && msg.id.length <= 200 || typeof msg.id === "number" && Number.isSafeInteger(msg.id))) id = msg.id as string | number; } catch { /* malformed requests have no usable id */ }
         await error(id, ERROR.INTERNAL_ERROR, "Internal error");

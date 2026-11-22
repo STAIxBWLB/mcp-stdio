@@ -51,6 +51,9 @@ for (const copy of ["vault-mem", "agent-research"]) {
     { kind: "handler-throw", schema: { type: "object", additionalProperties: false }, args: {}, handler: () => { throw Error("fixture failure"); } },
     { kind: "handler-oversize", schema: { type: "object", additionalProperties: false }, args: {}, handler: () => "x".repeat(resultBytes + 1) },
     ...(copy === "agent-research" ? [
+      { kind: "schema-empty-nul", schema: { type: "object", properties: { v: {} }, required: ["v"], additionalProperties: false }, args: { v: "\0" }, handler: () => ({ ok: true }) },
+      { kind: "schema-empty-forbidden", schema: { type: "object", properties: { v: {} }, required: ["v"], additionalProperties: false }, args: { v: JSON.parse('{"__proto__":1}') }, handler: () => ({ ok: true }) },
+      { kind: "schema-empty-depth", schema: { type: "object", properties: { v: {} }, required: ["v"], additionalProperties: false }, args: { v: JSON.parse("[".repeat(65) + "0" + "]".repeat(65)) }, handler: () => ({ ok: true }) },
       { kind: "schema-unique", schema: { type: "object", properties: { citations: { type: "array", items: { type: "string" }, uniqueItems: true } }, required: ["citations"], additionalProperties: false }, args: { citations: ["a", "a"] }, handler: () => ({ ok: true }) },
       { kind: "schema-exclusive", schema: { type: "object", properties: { maxLoadRatio: { type: "number", exclusiveMinimum: 0 } }, required: ["maxLoadRatio"], additionalProperties: false }, args: { maxLoadRatio: 0 }, handler: () => ({ ok: true }) },
     ] : []),
