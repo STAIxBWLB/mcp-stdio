@@ -106,3 +106,23 @@ test("invalid calls report the schema limit without echoing values", async () =>
   expect(result.actual).toBe(expected);
   expect(result.actual).not.toContain("secret");
 });
+
+test("deep arguments and unexpected request failures do not end the session", async () => {
+  const { serve, ERROR } = await import("../src/index.ts");
+  let output = "";
+  const writer = new Writable({ write(chunk, _encoding, callback) { output += chunk.toString(); callback(); } });
+  const line = (value: unknown) => JSON.stringify(value) + "\n";
+  const init = line({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: {} } }) + line({ jsonrpc: "2.0", method: "notifications/initialized" });
+  const deep = '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"echo","arguments":{"v":' + "[".repeat(32_000) + "0" + "]".repeat(32_000) + '}}}\n';
+  const crash = line({ jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "crash" } });
+  const ping = line({ jsonrpc: "2.0", id: 4, method: "ping" });
+  await serve({ name: "test", version: "1", input: Readable.from([init + deep + crash + ping]), output: writer,
+    tools: [{ name: "echo", description: "", inputSchema: { type: "object", properties: { v: {} }, additionalProperties: false } }],
+    handlers: { echo: () => true }, limits: { toolFrameBytes: name => { if (name === "crash") throw Error("private detail"); return undefined; } },
+  });
+  const messages = output.trim().split("\n").map(row => JSON.parse(row));
+  expect(messages.find(item => item.id === 2).error).toEqual({ code: -32602, message: "v: nested deeper than 64" });
+  expect(messages.find(item => item.id === 3).error).toEqual({ code: ERROR.INTERNAL_ERROR, message: "Internal error" });
+  expect(messages.find(item => item.id === 4).result).toEqual({});
+  expect(output).not.toContain("private detail");
+});

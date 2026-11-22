@@ -12,12 +12,21 @@ const base: Omit<ServeOptions, "input" | "output" | "close"> = {
 };
 for (const file of readdirSync("fixtures/v1").filter(name => name.endsWith(".jsonl"))) {
   test(file, async () => {
-    const cases = readFileSync(`fixtures/v1/${file}`, "utf8").trim().split("\n").map(line => JSON.parse(line) as TranscriptCase & { packageOutput?: string; tools?: ServeOptions["tools"]; frameBytes?: number; handlerNames?: string[] });
+    const cases = readFileSync(`fixtures/v1/${file}`, "utf8").trim().split("\n").map(line => JSON.parse(line) as TranscriptCase & { packageOutput?: string; tools?: ServeOptions["tools"]; frameBytes?: number; handlerNames?: string[]; fixtureKind?: string; resultBytes?: number; limitText?: string });
     const names: Record<string, [string, string]> = { "agent-mem.jsonl": ["amem", "fixture"], "vault-mem.jsonl": ["vault-mem", "fixture"], "agent-research.jsonl": ["agent-research", "fixture"], "agent-decide.jsonl": ["adec", "0.0.0"] };
-    const identity = names[file.replace("-protocol.jsonl", ".jsonl")];
-    const options = identity ? { ...base, name: identity[0], version: identity[1] } : base;
+    const identity = names[file.replace(/-(protocol|handler)\.jsonl$/, ".jsonl")];
+    const copyLimits: Record<string, { frameBytes: number; resultBytes: number }> = {
+      "amem": { frameBytes: 65_536, resultBytes: 262_144 },
+      "vault-mem": { frameBytes: 65_536, resultBytes: 262_144 },
+      "agent-research": { frameBytes: 131_072, resultBytes: 2_097_152 },
+      "adec": { frameBytes: 1_048_576, resultBytes: 262_144 },
+    };
+    const options = identity ? { ...base, name: identity[0], version: identity[1], limits: copyLimits[identity[0]] } : base;
     for (const item of cases) {
-      const [result] = await runTranscripts([item], { ...options, tools: item.tools ?? options.tools, handlers: item.handlerNames ? Object.fromEntries(item.handlerNames.map(name => [name, () => ({})])) : options.handlers, limits: item.frameBytes ? { frameBytes: item.frameBytes } : options.limits });
+      const handlers = item.fixtureKind ? { fixture: item.fixtureKind === "handler-throw" ? () => { throw Error("fixture failure"); } : item.fixtureKind === "handler-oversize" ? () => "x".repeat(item.resultBytes! + 1) : () => ({ ok: true }) } : item.handlerNames ? Object.fromEntries(item.handlerNames.map(name => [name, () => ({})])) : options.handlers;
+      const limits = item.resultBytes ? { resultBytes: item.resultBytes } : item.frameBytes ? { frameBytes: item.frameBytes } : options.limits;
+      const failureText = item.fixtureKind ? (error: unknown) => error instanceof ResultTooLarge ? item.limitText : undefined : options.failureText;
+      const [result] = await runTranscripts([item], { ...options, tools: item.tools ?? options.tools, handlers, limits, failureText });
       expect(result.actual, result.id).toBe(item.packageOutput ?? result.expected);
     }
   });

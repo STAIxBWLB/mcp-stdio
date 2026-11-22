@@ -2,6 +2,7 @@
 import { Readable, Writable } from "node:stream";
 import { resolve } from "node:path";
 import { readFileSync, writeFileSync } from "node:fs";
+import { ResultTooLarge } from "../src/server.ts";
 import { runTranscripts, type TranscriptCase } from "../src/conformance.ts";
 
 const sourceRoot = process.argv[2];
@@ -17,7 +18,7 @@ const cases: { name: string; input: string | number[] }[] = [
   { name: "truncated-eof", input: '{"jsonrpc":"2.0"' },
 ];
 const identities: Record<string, [string, string]> = { "agent-mem": ["amem", "fixture"], "vault-mem": ["vault-mem", "fixture"], "agent-research": ["agent-research", "fixture"], "agent-decide": ["adec", "0.0.0"] };
-let divergences = readFileSync("fixtures/v1/DIVERGENCES.md", "utf8").split("\n").filter(row => !row.includes("-protocol-")).join("\n").trimEnd() + "\n";
+let divergences = readFileSync("fixtures/v1/DIVERGENCES.md", "utf8").split("\n").filter(row => !row.includes("-protocol-") && !row.includes("-handler-") && !row.includes("-schema-")).join("\n").trimEnd() + "\n";
 for (const copy of Object.keys(identities)) {
   const original = await import(resolve(sourceRoot, copy, "src/mcp.ts"));
   const [name, version] = identities[copy];
@@ -41,5 +42,35 @@ for (const copy of Object.keys(identities)) {
     }
   }
   writeFileSync(`fixtures/v1/${copy}-protocol.jsonl`, recordings.map(item => JSON.stringify(item)).join("\n") + "\n");
+}
+for (const copy of ["vault-mem", "agent-research"]) {
+  const original = await import(resolve(sourceRoot, copy, "src/mcp.ts"));
+  const resultBytes = copy === "vault-mem" ? 262_144 : 2_097_152;
+  const limitText = JSON.stringify({ refused: true, issues: [{ code: "LIMIT", severity: "error", message: copy === "vault-mem" ? "result exceeds 256 KiB; narrow the request" : "result exceeds 2 MiB; narrow filters, lower the list limit or select fewer log streams" }] });
+  const tests = [
+    { kind: "handler-throw", schema: { type: "object", additionalProperties: false }, args: {}, handler: () => { throw Error("fixture failure"); } },
+    { kind: "handler-oversize", schema: { type: "object", additionalProperties: false }, args: {}, handler: () => "x".repeat(resultBytes + 1) },
+    ...(copy === "agent-research" ? [
+      { kind: "schema-unique", schema: { type: "object", properties: { citations: { type: "array", items: { type: "string" }, uniqueItems: true } }, required: ["citations"], additionalProperties: false }, args: { citations: ["a", "a"] }, handler: () => ({ ok: true }) },
+      { kind: "schema-exclusive", schema: { type: "object", properties: { maxLoadRatio: { type: "number", exclusiveMinimum: 0 } }, required: ["maxLoadRatio"], additionalProperties: false }, args: { maxLoadRatio: 0 }, handler: () => ({ ok: true }) },
+    ] : []),
+  ];
+  const recorded = [];
+  for (const test of tests) {
+    const tools = [{ name: "fixture", description: "fixture", inputSchema: test.schema, annotations: {} }];
+    const handlers = { fixture: test.handler };
+    const input = ready + req(2, "tools/call", { name: "fixture", arguments: test.args });
+    let output = "";
+    const stream = new Writable({ write(chunk, _encoding, done) { output += chunk.toString(); done(); } });
+    await original.serveMcp({ input: Readable.from([input]), output: stream, tools, handlers, name: copy, version: "fixture" });
+    const item = { id: `${copy}-${test.kind}`, input, output };
+    const [result] = await runTranscripts([item], { name: copy, version: "fixture", tools, handlers, limits: { resultBytes }, failureText: error => error instanceof ResultTooLarge ? limitText : undefined });
+    recorded.push({ ...item, tools, fixtureKind: test.kind, resultBytes, limitText, ...(!result.passed ? { packageOutput: result.actual } : {}) });
+    if (!result.passed) {
+      const last = (value: string) => value.trim().split("\n").at(-1);
+      divergences += `| ${copy} | ${item.id} | \`${last(output)}\` | \`${last(result.actual)}\` | ${test.kind === "handler-throw" ? "Opaque handler failure" : "Schema constraint enforcement"} |\n`;
+    }
+  }
+  writeFileSync(`fixtures/v1/${copy}-handler.jsonl`, recorded.map(item => JSON.stringify(item)).join("\n") + "\n");
 }
 writeFileSync("fixtures/v1/DIVERGENCES.md", divergences);

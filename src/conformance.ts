@@ -40,7 +40,7 @@ export async function runConformance(options: Omit<ServeOptions, "input" | "outp
   add("invalid-id", ready + line({ jsonrpc: "2.0", id: null, method: "ping" }), initialized + err(null, -32600, "Invalid request id"));
   add("notification", ready + line({ jsonrpc: "2.0", method: "tools/call", params: { name: options.tools[0]?.name ?? "missing", arguments: {} } }) + request(2, "ping"), initialized + response(2, {}));
   add("unknown-tool", ready + request(2, "tools/call", { name: "__mcp_stdio_unknown_tool__" }), initialized + err(2, -32602, "Invalid tool name or arguments"));
-  add("overflow", "x".repeat(frameBytes + 1) + "\n" + request(2, "ping"), err(null, -32600, `Request exceeds the ${frameBytes / 1024} KiB frame bound`) + response(2, {}));
+  add("overflow", "x".repeat(frameBytes + 1) + "\n" + request(2, "ping"), err(null, -32600, `Request exceeds the ${frameBytes % 1024 === 0 ? `${frameBytes / 1024} KiB` : `${frameBytes} bytes`} frame bound`) + response(2, {}));
   add("invalid-utf8", [195], err(null, -32700, "Invalid UTF-8 input"));
   add("incomplete", "{", err(null, -32700, "Incomplete request at EOF"));
   const objectTool = options.tools.find(tool => tool.inputSchema.type === "object" && Object.hasOwn(options.handlers, tool.name));

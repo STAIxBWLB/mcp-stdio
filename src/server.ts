@@ -6,7 +6,7 @@ import { initialize } from "./initialize.ts";
 import { argumentError } from "./validator.ts";
 import { writeConfirmed } from "./write-confirmed.ts";
 
-export const ERROR = { PARSE_ERROR: -32700, INVALID_REQUEST: -32600, METHOD_NOT_FOUND: -32601, INVALID_PARAMS: -32602, NOT_INITIALIZED: -32002 } as const;
+export const ERROR = { PARSE_ERROR: -32700, INVALID_REQUEST: -32600, METHOD_NOT_FOUND: -32601, INTERNAL_ERROR: -32603, INVALID_PARAMS: -32602, NOT_INITIALIZED: -32002 } as const;
 export class ResultTooLarge extends Error {
   constructor(public readonly limit: number) { super("result too large"); this.name = "ResultTooLarge"; }
 }
@@ -78,8 +78,14 @@ export async function serve(options: ServeOptions): Promise<void> {
     } else await send({ jsonrpc: "2.0", id, result });
   };
   try {
-    await readFrames(input, frameBytes, handle, async kind => {
-      if (kind === "overflow") await error(null, ERROR.INVALID_REQUEST, `Request exceeds the ${frameBytes / 1024} KiB frame bound`);
+    await readFrames(input, frameBytes, async line => {
+      try { await handle(line); } catch {
+        let id: string | number | null = null;
+        try { const msg: unknown = JSON.parse(line); if (plain(msg) && (typeof msg.id === "string" && msg.id.length <= 200 || typeof msg.id === "number" && Number.isSafeInteger(msg.id))) id = msg.id as string | number; } catch { /* malformed requests have no usable id */ }
+        await error(id, ERROR.INTERNAL_ERROR, "Internal error");
+      }
+    }, async kind => {
+      if (kind === "overflow") await error(null, ERROR.INVALID_REQUEST, `Request exceeds the ${frameBytes % 1024 === 0 ? `${frameBytes / 1024} KiB` : `${frameBytes} bytes`} frame bound`);
       else if (kind === "utf8") await error(null, ERROR.PARSE_ERROR, "Invalid UTF-8 input");
       else await error(null, ERROR.PARSE_ERROR, "Incomplete request at EOF");
     });

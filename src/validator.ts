@@ -1,9 +1,19 @@
-const safeValue = (value: unknown): boolean => {
-  if (typeof value === "string") return !value.includes("\0");
-  if (typeof value === "number") return Number.isFinite(value);
-  if (Array.isArray(value)) return value.every(safeValue);
-  if (plain(value)) return Object.keys(value).every(key => !["__proto__", "prototype", "constructor"].includes(key) && safeValue(value[key]));
-  return value === null || typeof value === "boolean";
+const safeValue = (value: unknown, depth: number): string | undefined => {
+  if (depth > 64) return "nested deeper than 64";
+  if (typeof value === "string") return value.includes("\0") ? "unsafe value" : undefined;
+  if (typeof value === "number") return Number.isFinite(value) ? undefined : "unsafe value";
+  if (Array.isArray(value)) {
+    for (const item of value) { const error = safeValue(item, depth + 1); if (error) return error; }
+    return undefined;
+  }
+  if (plain(value)) {
+    for (const key of Object.keys(value)) {
+      if (["__proto__", "prototype", "constructor"].includes(key)) return "unsafe value";
+      const error = safeValue(value[key], depth + 1); if (error) return error;
+    }
+    return undefined;
+  }
+  return value === null || typeof value === "boolean" ? undefined : "unsafe value";
 };
 const plain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v) && (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null);
 
@@ -18,13 +28,14 @@ const equal = (a: unknown, b: unknown): boolean => {
 };
 
 /** First schema failure only; paths and schema limits are reported, never argument values. */
-export function argumentError(value: unknown, raw: unknown, path = "", defaultStringLength = 65_536): string | undefined {
+export function argumentError(value: unknown, raw: unknown, path = "", defaultStringLength = 65_536, depth = 0): string | undefined {
   const at = path || "arguments", fail = (reason: string) => `${at}: ${reason}`;
+  if (depth > 64) return fail("nested deeper than 64");
   if (!plain(raw)) return fail("invalid schema");
-  if (Object.keys(raw).length === 0) return safeValue(value) ? undefined : fail("unsafe value");
+  if (Object.keys(raw).length === 0) { const unsafe = safeValue(value, depth); return unsafe ? fail(unsafe) : undefined; }
   if (Object.hasOwn(raw, "oneOf")) {
     if (Object.keys(raw).length !== 1 || !Array.isArray(raw.oneOf) || !raw.oneOf.length || raw.oneOf.length > 16 || raw.oneOf.some(branch => !plain(branch))) return fail("invalid oneOf schema");
-    return raw.oneOf.filter(branch => argumentError(value, branch, path, defaultStringLength) === undefined).length === 1 ? undefined : fail("expected exactly one matching schema");
+    return raw.oneOf.filter(branch => argumentError(value, branch, path, defaultStringLength, depth) === undefined).length === 1 ? undefined : fail("expected exactly one matching schema");
   }
   const allowed = ["type", "enum", "minLength", "maxLength", "pattern", "minimum", "maximum", "minItems", "maxItems", "items", "minProperties", "maxProperties", "required", "properties", "additionalProperties", "description", "title", "uniqueItems", "exclusiveMinimum"];
   if (Object.keys(raw).some(key => !allowed.includes(key))) return fail("unknown schema keyword");
@@ -48,12 +59,12 @@ export function argumentError(value: unknown, raw: unknown, path = "", defaultSt
   if (Array.isArray(value)) {
     if (value.length < (s.minItems ?? 0)) return fail(`fewer than ${s.minItems} items`);
     if (value.length > (s.maxItems ?? 64)) return fail(`more than ${s.maxItems ?? 64} items`);
-    if (s.uniqueItems === true && value.some((item, index) => value.slice(0, index).some(other => equal(item, other)))) return fail("items must be unique");
     if (!plain(s.items)) return fail("invalid item schema");
     for (let i = 0; i < value.length; i++) {
-      const error = argumentError(value[i], s.items, `${path}[${i}]`, defaultStringLength);
+      const error = argumentError(value[i], s.items, `${path}[${i}]`, defaultStringLength, depth + 1);
       if (error) return error;
     }
+    if (s.uniqueItems === true && value.some((item, index) => value.slice(0, index).some(other => equal(item, other)))) return fail("items must be unique");
   } else if (plain(value)) {
     const keys = Object.keys(value);
     if (keys.length < (s.minProperties ?? 0)) return fail(`fewer than ${s.minProperties} properties`);
@@ -67,7 +78,7 @@ export function argumentError(value: unknown, raw: unknown, path = "", defaultSt
       if (Object.hasOwn(s.properties ?? {}, key)) schema = s.properties[key];
       else if (s.additionalProperties === false || !plain(s.additionalProperties)) return `${path ? path + ": " : ""}unknown argument: ${key}`;
       else schema = s.additionalProperties;
-      const error = argumentError(value[key], schema, child, defaultStringLength);
+      const error = argumentError(value[key], schema, child, defaultStringLength, depth + 1);
       if (error) return error;
     }
   } else if (type === "object") return fail("expected plain object");
