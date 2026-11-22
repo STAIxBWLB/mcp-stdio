@@ -63,9 +63,14 @@ test("observer runs only after a successful response write", async () => {
   expect(writes.join("")).not.toContain("sensitive");
 });
 
+// agent-decide has no schema validator, so its original admission is unconditional.
 test("consumer schemas preserve recorded validator samples", async () => {
-  const { samples, rows } = await Bun.file("test/schema-samples.json").json() as { samples: unknown[]; rows: { name: string; schema: unknown; results: boolean[] }[] };
-  for (const row of rows) expect(samples.map(sample => validArguments(row.name.startsWith("agent-mem:") ? sample ?? {} : sample, row.schema)), row.name).toEqual(row.results);
+  const { samples, rows } = await Bun.file("test/schema-samples.json").json() as { samples: unknown[]; rows: { name: string; schema: unknown; results: boolean[]; accepted: unknown; originalAccepted: boolean }[] };
+  for (const row of rows) {
+    expect(samples.map(sample => validArguments(row.name.startsWith("agent-mem:") ? sample ?? {} : sample, row.schema)), row.name).toEqual(row.results);
+    expect(row.originalAccepted, `${row.name}: original accepts sample`).toBe(true);
+    expect(validArguments(row.accepted, row.schema), `${row.name}: accepted sample`).toBe(true);
+  }
 });
 
 test("shared conformance uses consumer tools for protocol and fixture handlers for calls", async () => {
@@ -82,4 +87,12 @@ test("shared conformance uses consumer tools for protocol and fixture handlers f
   for (const result of results) expect(result.actual, result.id).toBe(result.expected);
   expect(results.some(result => result.id === "tool-frame-bound")).toBe(true);
   expect(observed).toEqual(["echo"]);
+});
+
+test("exclusive minimum and unique arrays are enforced", () => {
+  expect(validArguments(1, { type: "number", exclusiveMinimum: 0 })).toBe(true);
+  expect(validArguments(0, { type: "number", exclusiveMinimum: 0 })).toBe(false);
+  const schema = { type: "array", items: {}, uniqueItems: true };
+  expect(validArguments(["a", "b"], schema)).toBe(true);
+  expect(validArguments([{ a: 1, b: 2 }, { b: 2, a: 1 }], schema)).toBe(false);
 });

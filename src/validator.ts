@@ -7,6 +7,16 @@ const safeValue = (value: unknown): boolean => {
 };
 const plain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v) && (Object.getPrototypeOf(v) === Object.prototype || Object.getPrototypeOf(v) === null);
 
+const equal = (a: unknown, b: unknown): boolean => {
+  if (a === b) return true;
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((item, i) => equal(item, b[i]));
+  if (plain(a) && plain(b)) {
+    const keys = Object.keys(a);
+    return keys.length === Object.keys(b).length && keys.every(key => Object.hasOwn(b, key) && equal(a[key], b[key]));
+  }
+  return false;
+};
+
 /** First schema failure only; paths and schema limits are reported, never argument values. */
 export function argumentError(value: unknown, raw: unknown, path = "", defaultStringLength = 65_536): string | undefined {
   const at = path || "arguments", fail = (reason: string) => `${at}: ${reason}`;
@@ -16,7 +26,7 @@ export function argumentError(value: unknown, raw: unknown, path = "", defaultSt
     if (Object.keys(raw).length !== 1 || !Array.isArray(raw.oneOf) || !raw.oneOf.length || raw.oneOf.length > 16 || raw.oneOf.some(branch => !plain(branch))) return fail("invalid oneOf schema");
     return raw.oneOf.filter(branch => argumentError(value, branch, path, defaultStringLength) === undefined).length === 1 ? undefined : fail("expected exactly one matching schema");
   }
-  const allowed = ["type", "enum", "minLength", "maxLength", "pattern", "minimum", "maximum", "minItems", "maxItems", "items", "minProperties", "maxProperties", "required", "properties", "additionalProperties", "description", "title"];
+  const allowed = ["type", "enum", "minLength", "maxLength", "pattern", "minimum", "maximum", "minItems", "maxItems", "items", "minProperties", "maxProperties", "required", "properties", "additionalProperties", "description", "title", "uniqueItems", "exclusiveMinimum"];
   if (Object.keys(raw).some(key => !allowed.includes(key))) return fail("unknown schema keyword");
   const s = raw as Record<string, any>, type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
   const types: unknown[] = Array.isArray(s.type) ? s.type : [s.type];
@@ -31,12 +41,14 @@ export function argumentError(value: unknown, raw: unknown, path = "", defaultSt
   }
   if (typeof value === "number") {
     if (!Number.isFinite(value)) return fail("expected finite number");
+    if (s.exclusiveMinimum !== undefined && value <= s.exclusiveMinimum) return fail(`not greater than ${s.exclusiveMinimum}`);
     if (value < (s.minimum ?? -Infinity)) return fail(`less than ${s.minimum}`);
     if (value > (s.maximum ?? Infinity)) return fail(`greater than ${s.maximum}`);
   }
   if (Array.isArray(value)) {
     if (value.length < (s.minItems ?? 0)) return fail(`fewer than ${s.minItems} items`);
     if (value.length > (s.maxItems ?? 64)) return fail(`more than ${s.maxItems ?? 64} items`);
+    if (s.uniqueItems === true && value.some((item, index) => value.slice(0, index).some(other => equal(item, other)))) return fail("items must be unique");
     if (!plain(s.items)) return fail("invalid item schema");
     for (let i = 0; i < value.length; i++) {
       const error = argumentError(value[i], s.items, `${path}[${i}]`, defaultStringLength);

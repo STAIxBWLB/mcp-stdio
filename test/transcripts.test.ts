@@ -12,12 +12,12 @@ const base: Omit<ServeOptions, "input" | "output" | "close"> = {
 };
 for (const file of readdirSync("fixtures/v1").filter(name => name.endsWith(".jsonl"))) {
   test(file, async () => {
-    const cases = readFileSync(`fixtures/v1/${file}`, "utf8").trim().split("\n").map(line => JSON.parse(line) as TranscriptCase & { packageOutput?: string; tools?: ServeOptions["tools"]; frameBytes?: number });
+    const cases = readFileSync(`fixtures/v1/${file}`, "utf8").trim().split("\n").map(line => JSON.parse(line) as TranscriptCase & { packageOutput?: string; tools?: ServeOptions["tools"]; frameBytes?: number; handlerNames?: string[] });
     const names: Record<string, [string, string]> = { "agent-mem.jsonl": ["amem", "fixture"], "vault-mem.jsonl": ["vault-mem", "fixture"], "agent-research.jsonl": ["agent-research", "fixture"], "agent-decide.jsonl": ["adec", "0.0.0"] };
     const identity = names[file];
     const options = identity ? { ...base, name: identity[0], version: identity[1] } : base;
     for (const item of cases) {
-      const [result] = await runTranscripts([item], { ...options, tools: item.tools ?? options.tools, limits: item.frameBytes ? { frameBytes: item.frameBytes } : options.limits });
+      const [result] = await runTranscripts([item], { ...options, tools: item.tools ?? options.tools, handlers: item.handlerNames ? Object.fromEntries(item.handlerNames.map(name => [name, () => ({})])) : options.handlers, limits: item.frameBytes ? { frameBytes: item.frameBytes } : options.limits });
       expect(result.actual, result.id).toBe(item.packageOutput ?? result.expected);
     }
   });

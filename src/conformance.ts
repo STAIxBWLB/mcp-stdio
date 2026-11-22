@@ -2,7 +2,7 @@ import { Readable, Writable } from "node:stream";
 import { serve, ResultTooLarge, type ServeOptions } from "./server.ts";
 
 /** A recorded request stream and its exact response stream. */
-export interface TranscriptCase { id: string; input: string | number[]; output: string; packageOutput?: string }
+export interface TranscriptCase { id: string; input: string | number[] | { repeat: string; count: number; suffix: string }; output: string; packageOutput?: string }
 export interface TranscriptResult { id: string; expected: string; actual: string; passed: boolean }
 /** Replay transcript cases against a consumer's actual tool table and options. */
 export function runTranscripts(options: Omit<ServeOptions, "input" | "output" | "close">): Promise<TranscriptResult[]>;
@@ -14,7 +14,8 @@ export async function runTranscripts(casesOrOptions: readonly TranscriptCase[] |
   for (const item of cases) {
     let actual = "";
     const output = new Writable({ write(chunk, _encoding, callback) { actual += chunk.toString(); callback(); } });
-    await serve({ ...options, input: Readable.from([typeof item.input === "string" ? Buffer.from(item.input) : Buffer.from(item.input)]), output });
+    const input = typeof item.input === "string" || Array.isArray(item.input) ? item.input : item.input.repeat.repeat(item.input.count) + item.input.suffix;
+    await serve({ ...options, input: Readable.from([Buffer.from(input)]), output });
     const expected = item.packageOutput ?? item.output;
     results.push({ id: item.id, expected, actual, passed: actual === expected });
   }
@@ -51,7 +52,7 @@ export async function runConformance(options: Omit<ServeOptions, "input" | "outp
   const failureResult = (value: unknown) => {
     let text: string | undefined;
     try { text = options.failureText?.(value); } catch { /* same fallback as serve */ }
-    return { isError: true, content: [{ type: "text", text: text ?? "Memory operation unavailable or refused; no partial result is shown." }] };
+    return { isError: true, content: [{ type: "text", text: text ?? "Operation unavailable or refused; no partial result is shown." }] };
   };
   add("invalid-arguments", ready + request(2, "tools/call", { name: "echo", arguments: { text: 7 } }), initialized + err(2, -32602, "Invalid tool name or arguments"), fixtureOptions);
   add("handler-failures", ready + request(2, "tools/call", { name: "fail" }) + request(3, "tools/call", { name: "named" }) + request(4, "tools/call", { name: "large" }), initialized + response(2, failureResult(failure)) + response(3, failureResult(named)) + response(4, failureResult(new ResultTooLarge(resultBytes))), fixtureOptions);
@@ -62,7 +63,7 @@ export async function runConformance(options: Omit<ServeOptions, "input" | "outp
     const boundedTools = [{ name: boundedName, description: "bound", inputSchema: schema }];
     const boundedOptions = { ...options, tools: boundedTools, handlers: { [boundedName]: () => ({}) } };
     const call = request(2, "tools/call", { name: boundedName, arguments: { text: "x".repeat(bound) } });
-    if (Buffer.byteLength(call) - 1 <= frameBytes) add("tool-frame-bound", ready + call, initialized + err(2, -32600, `${boundedName} request exceeds ${bound / 1024} KiB as the frame it was sent in; shorten the request or split the batch`), boundedOptions);
+    if (Buffer.byteLength(call) - 1 <= frameBytes) add("tool-frame-bound", ready + call, initialized + err(2, -32600, `${boundedName} request exceeds ${bound % 1024 === 0 ? `${bound / 1024} KiB` : `${bound} bytes`} as the frame it was sent in; shorten the request or split the batch`), boundedOptions);
   }
   const results: TranscriptResult[] = [];
   for (const { item, options: selected } of cases) results.push(...await runTranscripts([item], selected));

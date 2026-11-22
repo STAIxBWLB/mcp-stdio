@@ -54,7 +54,7 @@ export async function serve(options: ServeOptions): Promise<void> {
     const params = msg.params;
     if (!plain(params) || Object.keys(params).some(k => !["name", "arguments", "_meta"].includes(k)) || typeof params.name !== "string") { await error(id, ERROR.INVALID_PARAMS, "Invalid tool call"); return; }
     const bound = options.limits?.toolFrameBytes?.(params.name);
-    if (bound !== undefined && Buffer.byteLength(line, "utf8") + 1 > bound) { await error(id, ERROR.INVALID_REQUEST, `${params.name} request exceeds ${bound / 1024} KiB as the frame it was sent in; shorten the request or split the batch`); return; }
+    if (bound !== undefined && Buffer.byteLength(line, "utf8") + 1 > bound) { await error(id, ERROR.INVALID_REQUEST, `${params.name} request exceeds ${bound % 1024 === 0 ? `${bound / 1024} KiB` : `${bound} bytes`} as the frame it was sent in; shorten the request or split the batch`); return; }
     const definition = options.tools.find(t => t.name === params.name), args = params.arguments ?? {};
     const handler = definition && Object.hasOwn(options.handlers, definition.name) ? options.handlers[definition.name] : undefined;
     if (!definition || !handler || argumentError(args, definition.inputSchema, "", options.limits?.defaultStringLength) !== undefined) { await error(id, ERROR.INVALID_PARAMS, "Invalid tool name or arguments"); return; }
@@ -67,7 +67,7 @@ export async function serve(options: ServeOptions): Promise<void> {
     } catch (failure) {
       let text: string | undefined;
       try { text = options.failureText?.(failure); } catch { /* failure shaping cannot break the protocol */ }
-      result = { isError: true, content: [{ type: "text", text: text ?? "Memory operation unavailable or refused; no partial result is shown." }] };
+      result = { isError: true, content: [{ type: "text", text: text ?? "Operation unavailable or refused; no partial result is shown." }] };
     }
     if (succeeded && options.onEmitted) {
       await writeConfirmed(output, JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
