@@ -3,7 +3,7 @@ import { once } from "node:events";
 import type { Readable, Writable } from "node:stream";
 import { readFrames } from "./framing.ts";
 import { initialize, PROTOCOL_VERSIONS, STATELESS_VERSION } from "./initialize.ts";
-import { argumentError, schemaError } from "./validator.ts";
+import { argumentError, outputError, schemaError } from "./validator.ts";
 import { writeConfirmed } from "./write-confirmed.ts";
 
 export const ERROR = { PARSE_ERROR: -32700, INVALID_REQUEST: -32600, METHOD_NOT_FOUND: -32601, INTERNAL_ERROR: -32603, INVALID_PARAMS: -32602, NOT_INITIALIZED: -32002, UNSUPPORTED_PROTOCOL_VERSION: -32022 } as const;
@@ -54,8 +54,12 @@ const NO_CACHE = { ttlMs: 0, cacheScope: "private" } as const;
 /** MCP basic/transports: newline stdio only. Sequential, bounded, no listener or timer. */
 export async function serve(options: ServeOptions): Promise<void> {
   for (const tool of options.tools) {
-    const invalid = schemaError(tool.inputSchema);
-    if (invalid) throw new Error(`Tool ${JSON.stringify(tool.name)} inputSchema at ${invalid}`);
+    for (const field of ["inputSchema", "outputSchema"] as const) {
+      const schema = tool[field];
+      if (field === "outputSchema" && schema === undefined) continue;
+      const invalid = schemaError(schema);
+      if (invalid) throw new Error(`Tool ${JSON.stringify(tool.name)} ${field} at ${invalid}`);
+    }
   }
   const input = options.input ?? process.stdin, output = options.output ?? process.stdout;
   const frameBytes = options.limits?.frameBytes ?? 65_536, resultBytes = options.limits?.resultBytes ?? 262_144;
@@ -142,7 +146,8 @@ export async function serve(options: ServeOptions): Promise<void> {
     const definition = options.tools.find(t => t.name === params.name), args = params.arguments ?? {};
     const handler = definition && Object.hasOwn(options.handlers, definition.name) ? options.handlers[definition.name] : undefined;
     if (!definition || !handler) { await error(id, ERROR.INVALID_PARAMS, "Invalid tool name or arguments"); return; }
-    const toolArgumentErrors = (modern ? STATELESS_VERSION : protocolVersion ?? "") >= "2025-11-25";
+    const revision = modern ? STATELESS_VERSION : protocolVersion ?? "";
+    const toolArgumentErrors = revision >= "2025-11-25";
     if (toolArgumentErrors && Object.hasOwn(params, "arguments") && !plain(params.arguments)) {
       await error(id, ERROR.INVALID_PARAMS, invalidCall); return;
     }
@@ -159,7 +164,19 @@ export async function serve(options: ServeOptions): Promise<void> {
       const value = await handler(args as Record<string, unknown>), text = JSON.stringify(value);
       if (text === undefined) throw new Error("result unavailable");
       if (Buffer.byteLength(text) > resultBytes) throw new ResultTooLarge(resultBytes);
-      result = { content: [{ type: "text", text }] }; observedValue = value; succeeded = true;
+      result = { content: [{ type: "text", text }] };
+      if (definition.outputSchema !== undefined && revision >= "2025-06-18") {
+        // Validate the JSON on the wire and reuse it so both content representations agree.
+        const structuredContent: unknown = JSON.parse(text);
+        const invalidOutput = outputError(structuredContent, definition.outputSchema);
+        if (invalidOutput) throw new Error(`Tool result does not match outputSchema: ${invalidOutput}`);
+        if (!modern && !plain(structuredContent)) {
+          throw new Error("Structured tool results in the initialize era require a JSON object");
+        }
+        result.structuredContent = structuredContent;
+      }
+      observedValue = value;
+      succeeded = true;
     } catch (failure) {
       let text: string | undefined;
       try { text = options.failureText?.(failure); } catch { /* failure shaping cannot break the protocol */ }

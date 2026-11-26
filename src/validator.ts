@@ -34,24 +34,37 @@ const equal = (a: unknown, b: unknown): boolean => {
 
 /** First schema failure only; paths and schema limits are reported, never argument values. */
 export function argumentError(value: unknown, raw: unknown, path = "", defaultStringLength = 65_536, depth = 0): string | undefined {
+  return valueError(value, raw, path, defaultStringLength, depth);
+}
+
+export function outputError(value: unknown, schema: unknown): string | undefined {
+  return valueError(value, schema, "output", undefined, 0);
+}
+
+// An undefined default length selects output validation of an already serialized JSON value.
+function valueError(value: unknown, raw: unknown, path: string, defaultStringLength: number | undefined, depth: number): string | undefined {
+  const input = defaultStringLength !== undefined;
   const at = path || "arguments", fail = (reason: string) => `${at}: ${reason}`;
-  if (depth > 64) return fail("nested deeper than 64");
+  if (input && depth > 64) return fail("nested deeper than 64");
   if (!plain(raw)) return fail("invalid schema");
-  if (Object.keys(raw).length === 0) { const unsafe = safeValue(value, depth); return unsafe ? fail(unsafe) : undefined; }
+  if (Object.keys(raw).length === 0) { const unsafe = input ? safeValue(value, depth) : undefined; return unsafe ? fail(unsafe) : undefined; }
   if (Object.hasOwn(raw, "oneOf")) {
     if (Object.keys(raw).length !== 1 || !Array.isArray(raw.oneOf) || !raw.oneOf.length || raw.oneOf.length > 16 || raw.oneOf.some(branch => !plain(branch))) return fail("invalid oneOf schema");
-    return raw.oneOf.filter(branch => argumentError(value, branch, path, defaultStringLength, depth) === undefined).length === 1 ? undefined : fail("expected exactly one matching schema");
+    return raw.oneOf.filter(branch => valueError(value, branch, path, defaultStringLength, depth) === undefined).length === 1 ? undefined : fail("expected exactly one matching schema");
   }
   if (Object.keys(raw).some(key => !schemaKeywords.includes(key))) return fail("unknown schema keyword; use a supported keyword");
   const s = raw as Record<string, any>, type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
   const types: unknown[] = Array.isArray(s.type) ? s.type : [s.type];
-  if (!types.includes(type) && !(type === "number" && Number.isSafeInteger(value) && types.includes("integer"))) return fail(`expected ${types.join(" or ")}`);
-  if (type === "number" && !types.includes("number") && !Number.isSafeInteger(value)) return fail("expected safe integer");
-  if (s.enum && !s.enum.includes(value)) return fail("not an allowed value");
+  const integer = input ? Number.isSafeInteger : Number.isInteger;
+  if (!types.includes(type) && !(type === "number" && integer(value) && types.includes("integer"))) return fail(`expected ${types.join(" or ")}`);
+  if (type === "number" && !types.includes("number") && !integer(value)) return fail("expected safe integer");
+  if (s.enum && !(input ? s.enum.includes(value) : s.enum.some((item: unknown) => equal(item, value)))) return fail("not an allowed value");
   if (typeof value === "string") {
-    if (value.length < (s.minLength ?? 0)) return fail(`shorter than ${s.minLength}`);
-    if (value.length > (s.maxLength ?? defaultStringLength)) return fail(`longer than ${s.maxLength ?? defaultStringLength}`);
-    if (value.includes("\0")) return fail("NUL is not allowed");
+    const length = input || (s.minLength === undefined && s.maxLength === undefined) ? value.length : Array.from(value).length;
+    const maxLength = s.maxLength ?? defaultStringLength ?? Infinity;
+    if (length < (s.minLength ?? 0)) return fail(`shorter than ${s.minLength}`);
+    if (length > maxLength) return fail(`longer than ${maxLength}`);
+    if (input && value.includes("\0")) return fail("NUL is not allowed");
     if (s.pattern && !new RegExp(s.pattern).test(value)) return fail("does not match the required pattern");
   }
   if (typeof value === "number") {
@@ -62,28 +75,31 @@ export function argumentError(value: unknown, raw: unknown, path = "", defaultSt
   }
   if (Array.isArray(value)) {
     if (value.length < (s.minItems ?? 0)) return fail(`fewer than ${s.minItems} items`);
-    if (value.length > (s.maxItems ?? 64)) return fail(`more than ${s.maxItems ?? 64} items`);
+    const maxItems = s.maxItems ?? (input ? 64 : Infinity);
+    if (value.length > maxItems) return fail(`more than ${maxItems} items`);
     if (!plain(s.items)) return fail("invalid item schema");
     for (let i = 0; i < value.length; i++) {
-      const error = argumentError(value[i], s.items, `${path}[${i}]`, defaultStringLength, depth + 1);
+      const error = valueError(value[i], s.items, `${path}[${i}]`, defaultStringLength, depth + 1);
       if (error) return error;
     }
     if (s.uniqueItems === true && value.some((item, index) => value.slice(0, index).some(other => equal(item, other)))) return fail("items must be unique");
   } else if (plain(value)) {
     const keys = Object.keys(value);
     if (keys.length < (s.minProperties ?? 0)) return fail(`fewer than ${s.minProperties} properties`);
-    if (keys.length > (s.maxProperties ?? 64)) return fail(`more than ${s.maxProperties ?? 64} properties`);
+    const maxProperties = s.maxProperties ?? (input ? 64 : Infinity);
+    if (keys.length > maxProperties) return fail(`more than ${maxProperties} properties`);
     for (const key of s.required ?? []) if (!Object.hasOwn(value, key)) return `${path ? path + "." : ""}${key}: required`;
     for (const key of keys) {
-      if (key.length > 200) return fail("property name longer than 200");
+      if (input && key.length > 200) return fail("property name longer than 200");
       const child = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? (path ? `${path}.${key}` : key) : `${path || "$"}[${JSON.stringify(key)}]`;
-      if (key.includes("\0") || ["__proto__", "prototype", "constructor"].includes(key)) return `${child}: forbidden property name`;
+      if (input && (key.includes("\0") || ["__proto__", "prototype", "constructor"].includes(key))) return `${child}: forbidden property name`;
       let schema;
       if (Object.hasOwn(s.properties ?? {}, key)) schema = s.properties[key];
       else if (s.additionalProperties === true) schema = {};
+      else if (!input && s.additionalProperties === undefined) continue;
       else if (!plain(s.additionalProperties)) return `${path ? path + ": " : ""}unknown argument: ${key}`;
       else schema = s.additionalProperties;
-      const error = argumentError(value[key], schema, child, defaultStringLength, depth + 1);
+      const error = valueError(value[key], schema, child, defaultStringLength, depth + 1);
       if (error) return error;
     }
   } else if (type === "object") return fail("expected plain object");

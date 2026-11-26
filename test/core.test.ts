@@ -112,7 +112,7 @@ test("shared conformance uses consumer tools for protocol and fixture handlers f
   });
   for (const result of results) expect(result.actual, result.id).toBe(result.expected);
   expect(results.some(result => result.id === "tool-frame-bound")).toBe(true);
-  expect(observed).toEqual(Array(6).fill("echo"));
+  expect(observed).toEqual(Array(8).fill("echo"));
 });
 
 test("exclusive minimum and unique arrays are enforced", () => {
@@ -307,4 +307,154 @@ test("stateless tool calls observe confirmed successes and shape handler failure
     content: [{ type: "text", text: "safe refusal" }],
     _meta: { "io.modelcontextprotocol/serverInfo": { name: "fixture", version: "1" } },
   });
+});
+
+test("serve checks output schemas before reading input", async () => {
+  const { serve } = await import("../src/index.ts");
+  let reads = 0;
+  const input = new Readable({ read() { reads++; this.push(null); } });
+  await expect(serve({
+    name: "fixture", version: "1", input,
+    tools: [{
+      name: "invalid", description: "", inputSchema: { type: "object", additionalProperties: false },
+      outputSchema: { type: "object", properties: { value: { type: "array" } } },
+    }],
+    handlers: {},
+  })).rejects.toThrow(/Tool "invalid" outputSchema at \$\.properties\["value"\]\.items:.*add an item schema/);
+  expect(reads).toBe(0);
+});
+
+test("structured output follows the revision and uses the same JSON as the text block", async () => {
+  const { runTranscripts } = await import("../src/index.ts");
+  const line = (value: unknown) => JSON.stringify(value) + "\n";
+  const response = (id: number, result: unknown) => line({ jsonrpc: "2.0", id, result });
+  const call = (id: number, name: string, meta?: unknown) => line({
+    jsonrpc: "2.0", id, method: "tools/call", params: { name, ...(meta ? { _meta: meta } : {}) },
+  });
+  const info = { name: "fixture", version: "1" };
+  const content = (value: unknown) => [{ type: "text", text: JSON.stringify(value) }];
+  const value = { count: 2 };
+  const legacy = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"].map((protocolVersion, index) => ({
+    id: protocolVersion,
+    input: line({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion, capabilities: {}, clientInfo: {} } })
+      + line({ jsonrpc: "2.0", method: "notifications/initialized" }) + call(2, "object"),
+    output: response(1, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: info })
+      + response(2, { content: content(value), ...(index >= 2 ? { structuredContent: value } : {}) }),
+  }));
+  const stateless = {
+    id: "stateless scalar",
+    input: call(1, "scalar", {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28", "io.modelcontextprotocol/clientCapabilities": {},
+    }),
+    output: response(1, {
+      resultType: "complete", content: content(2), structuredContent: 2,
+      _meta: { "io.modelcontextprotocol/serverInfo": info },
+    }),
+  };
+  const inputSchema = { type: "object", additionalProperties: false };
+  const results = await runTranscripts([...legacy, stateless], {
+    ...info,
+    tools: [
+      { name: "object", description: "", inputSchema, outputSchema: { type: "object", properties: { count: { type: "integer" } }, required: ["count"] } },
+      { name: "scalar", description: "", inputSchema, outputSchema: { type: "integer" } },
+    ],
+    handlers: { object: () => value, scalar: () => 2 },
+  });
+  for (const result of results) expect(result.actual, result.id).toBe(result.expected);
+});
+
+test("output mismatches use handler error shaping without notifying onEmitted", async () => {
+  const { serve } = await import("../src/index.ts");
+  const { OPAQUE_FAILURE } = await import("../src/messages.ts");
+  const line = (value: unknown) => JSON.stringify(value) + "\n";
+  const call = (id: number, name: string) => line({ jsonrpc: "2.0", id, method: "tools/call", params: {
+    name, _meta: {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": {},
+    },
+  } });
+  for (const shape of [false, true]) {
+    const observed: string[] = [];
+    const results: { result: unknown }[] = [];
+    const schema = { type: "object", additionalProperties: false };
+    const outputSchema = { type: "object", properties: { count: { type: "integer" } }, required: ["count"] };
+    const notices: string[] = [];
+    await serve({
+      name: "fixture", version: "1",
+      input: Readable.from([call(1, "bad") + call(2, "good")]),
+      output: new Writable({ write(chunk, _encoding, callback) { results.push(JSON.parse(chunk.toString())); callback(); } }),
+      tools: ["bad", "good"].map(name => ({ name, description: "", inputSchema: schema, outputSchema })),
+      handlers: {
+        bad: () => ({ count: 2, toJSON: () => ({ count: "invalid" }) }),
+        good: () => ({ count: 2 }),
+      },
+      onEmitted: name => { observed.push(name); },
+      failureText: shape ? error => {
+        if (error instanceof Error) notices.push(error.message);
+        return "safe output refusal";
+      } : undefined,
+    });
+    expect(observed).toEqual(["good"]);
+    expect(results[0]?.result).toEqual({
+      resultType: "complete", isError: true, content: [{ type: "text", text: shape ? "safe output refusal" : OPAQUE_FAILURE }],
+      _meta: { "io.modelcontextprotocol/serverInfo": { name: "fixture", version: "1" } },
+    });
+    if (shape) expect(notices).toEqual(["Tool result does not match outputSchema: output.count: expected integer"]);
+  }
+});
+
+test("structured output uses declared limits independently of input safety limits", async () => {
+  const { runTranscripts } = await import("../src/index.ts");
+  const line = (value: unknown) => JSON.stringify(value) + "\n";
+  const info = { name: "fixture", version: "1" };
+  const response = (id: number, result: Record<string, unknown>) => line({
+    jsonrpc: "2.0", id, result: { resultType: "complete", ...result, _meta: { "io.modelcontextprotocol/serverInfo": info } },
+  });
+  const call = (id: number, name: string) => line({
+    jsonrpc: "2.0", id, method: "tools/call", params: {
+      name, _meta: {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
+      },
+    },
+  });
+  const outputSchema = {
+    type: "object", properties: {
+      hits: { type: "array", items: { type: "integer" } },
+      text: { type: "string" },
+      constructor: { type: "string" },
+      nested: {},
+    },
+  };
+  const value = {
+    hits: Array.from({ length: 100 }, (_, index) => index),
+    text: "NUL\0in a result",
+    constructor: "an output property",
+    nested: { ["__proto__"]: "an output property", ["nul\0key"]: "nested\0value" },
+    ...Object.fromEntries(Array.from({ length: 65 }, (_, index) => [`extra${index}`, index])),
+  };
+  const shaped: string[] = [];
+  const inputSchema = { type: "object", additionalProperties: false };
+  const [result] = await runTranscripts([{
+    id: "structured output limits",
+    input: call(1, "unbounded") + call(2, "bounded"),
+    output: response(1, { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value })
+      + response(2, { isError: true, content: [{ type: "text", text: "output limit reached" }] }),
+  }], {
+    ...info,
+    limits: { defaultStringLength: 2 },
+    tools: [
+      { name: "unbounded", description: "", inputSchema, outputSchema },
+      { name: "bounded", description: "", inputSchema, outputSchema: { type: "array", items: {}, maxItems: 2 } },
+    ],
+    handlers: { unbounded: () => value, bounded: () => [1, 2, 3] },
+    failureText: error => {
+      if (error instanceof Error) shaped.push(error.message);
+      return "output limit reached";
+    },
+  });
+  expect(result.actual).toBe(result.expected);
+  expect(shaped).toEqual(["Tool result does not match outputSchema: output: more than 2 items"]);
+  expect(argumentError(value.hits, outputSchema.properties.hits)).toBe("arguments: more than 64 items");
+  expect(argumentError(value.text, outputSchema.properties.text)).toBe("arguments: NUL is not allowed");
 });

@@ -4,6 +4,8 @@ All notable changes to `@staix/mcp-stdio` are recorded here. The format follows 
 
 ## [Unreleased]
 
+- Tools with `outputSchema` return validated `structuredContent` alongside the JSON text block in revisions that support structured output, starting with `2025-06-18`. Invalid output schemas stop startup. Results that fail output validation use the existing handler-failure response and `failureText` mapper.
+
 - Support stateless MCP `2026-07-28` alongside the initialize-era revisions, including `server/discover`, per-request metadata validation and stateless result metadata. Initialize-era responses are preserved. After a process selects an era, requests in the other era are rejected.
 - The exported `PROTOCOL_VERSIONS` now starts with `2026-07-28`. The preferred revision for `initialize` remains `2025-11-25`.
 - Add `listCache` for stateless `tools/list`. Tool listings and discovery default to private caching with a zero TTL.
@@ -13,6 +15,7 @@ All notable changes to `@staix/mcp-stdio` are recorded here. The format follows 
 
 - `serve` now refuses unsupported or ambiguous tool input schemas at startup, before reading input. Use the exported `schemaError` to check tool tables. Existing bare object arguments, including agent-decide's `question` and `request` (agent-decide#18) and the agent-research bare-object arguments (agent-research#198), need explicit object properties or an `additionalProperties` policy.
 - `additionalProperties: true` accepts extra fields under the same safety rules as `additionalProperties: {}`.
+- Argument validation rejects NUL characters in property names, including names inside objects accepted by an empty schema.
 - Recorded transcripts keep their existing responses. The test harness declares the recorded bare objects as closed with `additionalProperties: false`, so the generated `tools/list` case advertises that explicit policy. `tools/list` still returns the supplied tool table.
 
 ## [0.1.0] - 2026-11-22

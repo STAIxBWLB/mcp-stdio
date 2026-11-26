@@ -12,11 +12,11 @@ await serve({
 });
 ```
 
-`serve` accepts `instructions`, input/output streams, a close callback and limits for frame bytes, result bytes, default string length and individual tool frame bytes. Defaults are 64 KiB, 256 KiB and 64 KiB respectively. `failureText` can map a thrown error or `ResultTooLarge` to a safe, content-free response; otherwise failures are opaque. `onEmitted` observes successful calls only after the output callback confirms the write.
+`serve` accepts `instructions`, input/output streams, a close callback and limits for frame bytes, result bytes, default string length and individual tool frame bytes. Defaults are 64 KiB, 256 KiB and 64 KiB respectively. `failureText` can map a thrown error or `ResultTooLarge` to client-facing text. The consumer decides what is safe to disclose. The default response is opaque. `onEmitted` observes successful calls only after the output callback confirms the write.
 
 `validArguments(value, schema)` and `argumentError(value, schema)` validate the bounded schema vocabulary. `writeConfirmed(output, text)`, `PROTOCOL_VERSIONS`, `ERROR` and `ResultTooLarge` are also exported. `runTranscripts(options)` runs the shared protocol cases against the consumer tool table and the handler-dependent cases with fixture tools, retaining the consumer options. `runTranscripts(cases, options)` replays recorded input/output streams and returns exact comparison results.
 
-To return an application-defined refusal in the tool result's text block, provide a `failureText` mapper. Use a trusted error type for messages intended for clients and bound the length before serializing. Other errors retain the default opaque message.
+To return an application-defined refusal in the tool result's text block, pass the following `failureText` mapper to `serve` and throw `ToolRefusal` from the handler. Use a trusted error type for messages intended for clients and bound the length before serializing. Other errors retain the default opaque message.
 
 ```ts
 class ToolRefusal extends Error {}
@@ -47,6 +47,12 @@ Tool definitions can include `title`, `icons`, `outputSchema`, and annotations w
 `serve` checks every tool's `inputSchema` before reading stdio. It rejects unsupported keywords, arrays without an `items` schema, malformed `oneOf` (use 1 to 16 schema objects as the sole keyword), and object schemas that omit both `properties` and `additionalProperties`. Use a supported `type` (or an array of supported types) for every schema other than `{}` and standalone `oneOf`. Keyword values must have the expected shape, including valid regular expression strings, finite numeric bounds, and non-negative integer counts. Startup errors identify the tool, schema location and correction. Use `schemaError(schema)` to check a tool table before startup. It returns the first diagnostic or `undefined`.
 
 An object with `properties` and no `additionalProperties` accepts only declared keys. Use `additionalProperties: false` to express this explicitly, a schema to validate extra values, or `additionalProperties: true` (equivalent to `{}`) to accept extra values subject to empty-schema safety checks.
+
+## Structured tool results
+
+Declare `outputSchema` to return the handler's JSON value in `structuredContent` as well as the existing JSON text block. This applies to `2025-06-18`, `2025-11-25` and `2026-07-28`. The two initialize-era revisions require a JSON object for structured content. The stateless revision supports any JSON value allowed by the schema.
+
+`serve` checks output schemas at startup with the same schema rules as input schemas. A handler result that fails output validation uses the existing tool failure response and `failureText` mapper. Output validation uses the bounds declared in the output schema. As in JSON Schema, omitted `additionalProperties` allows extra output fields. The configured result byte limit still applies to the serialized handler value.
 
 To migrate a consumer, keep its tool definitions and handlers, pass its existing name, version, limits, instructions and safe failure mapping to `serve`, and remove its local loop and validator. Run the shared transcripts and preserve tests for the consumer's own tool behavior. For agent-decide, pass `limits: { resultBytes: Infinity }` to keep its current unbounded result behavior, and change the nested `question` and `request` schemas to include `additionalProperties: {}` so their existing fields remain accepted. Agent-mem can preserve its previous opaque wording through `failureText`. Review `fixtures/v1/DIVERGENCES.md` and the strict initialization and validation contract before migrating.
 
