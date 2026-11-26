@@ -1,4 +1,4 @@
-export { argumentError, validArguments } from "./validator.ts";
+export { argumentError, schemaError, validArguments } from "./validator.ts";
 export { writeConfirmed } from "./write-confirmed.ts";
 export { PROTOCOL_VERSIONS } from "./initialize.ts";
 export { serve, ERROR, ResultTooLarge } from "./server.ts";
