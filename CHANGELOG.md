@@ -4,6 +4,8 @@ All notable changes to `@staix/mcp-stdio` are recorded here. The format follows 
 
 ## [Unreleased]
 
+- Tools with `outputSchema` return validated `structuredContent` alongside the JSON text block in revisions that support structured output, starting with `2025-06-18`. Invalid output schemas stop startup. Results that fail output validation use the existing handler-failure response and `failureText` mapper.
+
 - Support stateless MCP `2026-07-28` alongside the initialize-era revisions, including `server/discover`, per-request metadata validation and stateless result metadata. Initialize-era responses are preserved. After a process selects an era, requests in the other era are rejected.
 - The exported `PROTOCOL_VERSIONS` now starts with `2026-07-28`. The preferred revision for `initialize` remains `2025-11-25`.
 - Add `listCache` for stateless `tools/list`. Tool listings and discovery default to private caching with a zero TTL.

@@ -24,6 +24,8 @@ export async function runTranscripts(casesOrOptions: readonly TranscriptCase[] |
   return results;
 }
 
+type VersionedFixtureCase = TranscriptCase & { tools?: ServeOptions["tools"] };
+
 /** Run the shared protocol and handler cases with a consumer's configuration. */
 export async function runConformance(options: Omit<ServeOptions, "input" | "output" | "close">): Promise<TranscriptResult[]> {
   const line = (value: unknown) => JSON.stringify(value) + "\n";
@@ -73,16 +75,16 @@ export async function runConformance(options: Omit<ServeOptions, "input" | "outp
     if (Buffer.byteLength(call) - 1 <= frameBytes) add("tool-frame-bound", ready + call, initialized + err(2, -32600, `${boundedName} request exceeds ${bound % 1024 === 0 ? `${bound / 1024} KiB` : `${bound} bytes`} as the frame it was sent in; shorten the request or split the batch`), boundedOptions);
   }
   const versionedFixture = await readFile(new URL("../fixtures/v1/2025-11-25.jsonl", import.meta.url), "utf8");
-  const versionedCases: TranscriptCase[] = versionedFixture.trimEnd().split("\n").map(line => {
-    const item = JSON.parse(line) as TranscriptCase;
+  const versionedCases: VersionedFixtureCase[] = versionedFixture.trimEnd().split("\n").map(line => {
+    const item = JSON.parse(line) as VersionedFixtureCase;
     // The fixture starts with initialize. Adapt only its server identity and instructions.
     const output = initializeResponse("2025-11-25") + item.output.slice(item.output.indexOf("\n") + 1);
     return { ...item, output };
   });
-  for (const item of versionedCases) cases.push({ item, options: fixtureOptions });
+  for (const item of versionedCases) cases.push({ item, options: { ...fixtureOptions, tools: item.tools ?? fixtureOptions.tools } });
   const statelessFixture = await readFile(new URL("../fixtures/v1/2026-07-28.jsonl", import.meta.url), "utf8");
   for (const entry of statelessFixture.trimEnd().split("\n")) {
-    const item = JSON.parse(entry) as TranscriptCase;
+    const item = JSON.parse(entry) as VersionedFixtureCase;
     const output = item.output.trimEnd().split("\n").map(row => {
       const message = JSON.parse(row);
       const result = message.result;
@@ -104,7 +106,7 @@ export async function runConformance(options: Omit<ServeOptions, "input" | "outp
       }
       return line(message);
     }).join("");
-    cases.push({ item: { ...item, output }, options: fixtureOptions });
+    cases.push({ item: { ...item, output }, options: { ...fixtureOptions, tools: item.tools ?? fixtureOptions.tools } });
   }
   const results: TranscriptResult[] = [];
   for (const { item, options: selected } of cases) {
