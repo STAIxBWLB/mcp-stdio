@@ -2,7 +2,7 @@ import { OPAQUE_FAILURE } from "./messages.ts";
 import { once } from "node:events";
 import type { Readable, Writable } from "node:stream";
 import { readFrames } from "./framing.ts";
-import { initialize } from "./initialize.ts";
+import { initialize, type ProtocolVersion } from "./initialize.ts";
 import { argumentError, schemaError } from "./validator.ts";
 import { writeConfirmed } from "./write-confirmed.ts";
 
@@ -10,7 +10,29 @@ export const ERROR = { PARSE_ERROR: -32700, INVALID_REQUEST: -32600, METHOD_NOT_
 export class ResultTooLarge extends Error {
   constructor(public readonly limit: number) { super("result too large"); this.name = "ResultTooLarge"; }
 }
-export interface Tool { name: string; description: string; inputSchema: Record<string, unknown>; annotations?: Record<string, boolean> }
+interface ToolIcon {
+  src: string;
+  mimeType?: string;
+  sizes?: readonly string[];
+  theme?: "light" | "dark";
+}
+interface ToolAnnotations {
+  title?: string | boolean;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+  [hint: string]: string | boolean | undefined;
+}
+export interface Tool {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  title?: string;
+  icons?: readonly ToolIcon[];
+  outputSchema?: Record<string, unknown>;
+  annotations?: ToolAnnotations;
+}
 export type Handler = (args: Record<string, unknown>) => unknown | Promise<unknown>;
 export interface ServeOptions {
   name: string; version: string; instructions?: string;
@@ -31,6 +53,7 @@ export async function serve(options: ServeOptions): Promise<void> {
   const input = options.input ?? process.stdin, output = options.output ?? process.stdout;
   const frameBytes = options.limits?.frameBytes ?? 65_536, resultBytes = options.limits?.resultBytes ?? 262_144;
   let phase: "new" | "initializing" | "ready" = "new";
+  let protocolVersion: ProtocolVersion | undefined;
   let confirmedWriteFailed = false;
   const send = async (response: unknown) => { if (!output.write(JSON.stringify(response) + "\n")) await once(output, "drain"); };
   const error = (id: unknown, code: number, message: string) => send({ jsonrpc: "2.0", id, error: { code, message } });
@@ -48,6 +71,7 @@ export async function serve(options: ServeOptions): Promise<void> {
     if (msg.method === "initialize") {
       const result = initialize(msg.params, options.name, options.version, options.instructions);
       if (phase !== "new" || !result) { await error(id, ERROR.INVALID_PARAMS, "Invalid initialization"); return; }
+      protocolVersion = result.protocolVersion;
       phase = "initializing"; await send({ jsonrpc: "2.0", id, result }); return;
     }
     if (phase !== "ready") { await error(id, ERROR.NOT_INITIALIZED, "Initialize the session first"); return; }
@@ -64,8 +88,16 @@ export async function serve(options: ServeOptions): Promise<void> {
     const definition = options.tools.find(t => t.name === params.name), args = params.arguments ?? {};
     const handler = definition && Object.hasOwn(options.handlers, definition.name) ? options.handlers[definition.name] : undefined;
     if (!definition || !handler) { await error(id, ERROR.INVALID_PARAMS, "Invalid tool name or arguments"); return; }
+    const toolArgumentErrors = protocolVersion === "2025-11-25";
+    if (toolArgumentErrors && Object.hasOwn(params, "arguments") && !plain(params.arguments)) {
+      await error(id, ERROR.INVALID_PARAMS, "Invalid tool call"); return;
+    }
     const invalid = argumentError(args, definition.inputSchema, "", options.limits?.defaultStringLength);
-    if (invalid) { await error(id, ERROR.INVALID_PARAMS, invalid); return; }
+    if (invalid) {
+      if (toolArgumentErrors) await send({ jsonrpc: "2.0", id, result: { isError: true, content: [{ type: "text", text: invalid }] } });
+      else await error(id, ERROR.INVALID_PARAMS, invalid);
+      return;
+    }
     let result: unknown, observedValue: unknown, succeeded = false;
     try {
       const value = await handler(args as Record<string, unknown>), text = JSON.stringify(value);
