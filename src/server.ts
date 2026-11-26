@@ -83,7 +83,7 @@ export async function serve(options: ServeOptions): Promise<void> {
     const meta = plain(params) && plain(params._meta) ? params._meta : undefined;
     const modernRequest = meta !== undefined && (Object.hasOwn(meta, VERSION_KEY) || Object.hasOwn(meta, CAPABILITIES_KEY));
     if (modernRequest && phase !== "new") {
-      await error(id, ERROR.INVALID_PARAMS, "This process is in the initialize era"); return;
+      await error(id, ERROR.INVALID_PARAMS, "This process is in the initialize era. Send initialize-era requests without stateless metadata, or start a new server process for stateless requests."); return;
     }
     const discover = msg.method === "server/discover";
     if (modernRequest && !discover) stateless = true;
@@ -91,7 +91,7 @@ export async function serve(options: ServeOptions): Promise<void> {
 
     if (modern) {
       if (msg.method === "initialize") {
-        await error(id, ERROR.METHOD_NOT_FOUND, `This process is in the stateless era; supported stateless versions: ${STATELESS_VERSION}`);
+        await error(id, ERROR.METHOD_NOT_FOUND, `This process is in the stateless era. Supported stateless versions: ${STATELESS_VERSION}. Send stateless requests with _meta, or start a new server process to initialize.`);
         return;
       }
       const requested = meta?.[VERSION_KEY];
@@ -109,7 +109,7 @@ export async function serve(options: ServeOptions): Promise<void> {
       }
       if (discover) {
         if (!plain(params) || Object.keys(params).some(key => key !== "_meta")) {
-          await error(id, ERROR.INVALID_PARAMS, "Invalid discovery parameters"); return;
+          await error(id, ERROR.INVALID_PARAMS, "Invalid discovery parameters. Send only _meta in params."); return;
         }
         await send({ jsonrpc: "2.0", id, result: complete({
           supportedVersions: PROTOCOL_VERSIONS,
