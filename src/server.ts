@@ -3,7 +3,7 @@ import { once } from "node:events";
 import type { Readable, Writable } from "node:stream";
 import { readFrames } from "./framing.ts";
 import { initialize, PROTOCOL_VERSIONS, STATELESS_VERSION } from "./initialize.ts";
-import { argumentError, schemaError } from "./validator.ts";
+import { argumentError, outputError, schemaError } from "./validator.ts";
 import { writeConfirmed } from "./write-confirmed.ts";
 
 export const ERROR = { PARSE_ERROR: -32700, INVALID_REQUEST: -32600, METHOD_NOT_FOUND: -32601, INTERNAL_ERROR: -32603, INVALID_PARAMS: -32602, NOT_INITIALIZED: -32002, UNSUPPORTED_PROTOCOL_VERSION: -32022 } as const;
@@ -168,7 +168,7 @@ export async function serve(options: ServeOptions): Promise<void> {
       if (definition.outputSchema !== undefined && revision >= "2025-06-18") {
         // Validate the JSON on the wire and reuse it so both content representations agree.
         const structuredContent: unknown = JSON.parse(text);
-        const invalidOutput = argumentError(structuredContent, definition.outputSchema, "output", options.limits?.defaultStringLength);
+        const invalidOutput = outputError(structuredContent, definition.outputSchema);
         if (invalidOutput) throw new Error(`Tool result does not match outputSchema: ${invalidOutput}`);
         if (!modern && !plain(structuredContent)) {
           throw new Error("Structured tool results in the initialize era require a JSON object");

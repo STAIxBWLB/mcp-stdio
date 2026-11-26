@@ -402,3 +402,59 @@ test("output mismatches use handler error shaping without notifying onEmitted", 
     if (shape) expect(notices).toEqual(["Tool result does not match outputSchema: output.count: expected integer"]);
   }
 });
+
+test("structured output uses declared limits independently of input safety limits", async () => {
+  const { runTranscripts } = await import("../src/index.ts");
+  const line = (value: unknown) => JSON.stringify(value) + "\n";
+  const info = { name: "fixture", version: "1" };
+  const response = (id: number, result: Record<string, unknown>) => line({
+    jsonrpc: "2.0", id, result: { resultType: "complete", ...result, _meta: { "io.modelcontextprotocol/serverInfo": info } },
+  });
+  const call = (id: number, name: string) => line({
+    jsonrpc: "2.0", id, method: "tools/call", params: {
+      name, _meta: {
+        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities": {},
+      },
+    },
+  });
+  const outputSchema = {
+    type: "object", properties: {
+      hits: { type: "array", items: { type: "integer" } },
+      text: { type: "string" },
+      constructor: { type: "string" },
+      nested: {},
+    },
+  };
+  const value = {
+    hits: Array.from({ length: 100 }, (_, index) => index),
+    text: "NUL\0in a result",
+    constructor: "an output property",
+    nested: { ["__proto__"]: "an output property", ["nul\0key"]: "nested\0value" },
+    ...Object.fromEntries(Array.from({ length: 65 }, (_, index) => [`extra${index}`, index])),
+  };
+  const shaped: string[] = [];
+  const inputSchema = { type: "object", additionalProperties: false };
+  const [result] = await runTranscripts([{
+    id: "structured output limits",
+    input: call(1, "unbounded") + call(2, "bounded"),
+    output: response(1, { content: [{ type: "text", text: JSON.stringify(value) }], structuredContent: value })
+      + response(2, { isError: true, content: [{ type: "text", text: "output limit reached" }] }),
+  }], {
+    ...info,
+    limits: { defaultStringLength: 2 },
+    tools: [
+      { name: "unbounded", description: "", inputSchema, outputSchema },
+      { name: "bounded", description: "", inputSchema, outputSchema: { type: "array", items: {}, maxItems: 2 } },
+    ],
+    handlers: { unbounded: () => value, bounded: () => [1, 2, 3] },
+    failureText: error => {
+      if (error instanceof Error) shaped.push(error.message);
+      return "output limit reached";
+    },
+  });
+  expect(result.actual).toBe(result.expected);
+  expect(shaped).toEqual(["Tool result does not match outputSchema: output: more than 2 items"]);
+  expect(argumentError(value.hits, outputSchema.properties.hits)).toBe("arguments: more than 64 items");
+  expect(argumentError(value.text, outputSchema.properties.text)).toBe("arguments: NUL is not allowed");
+});
