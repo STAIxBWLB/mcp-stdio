@@ -18,7 +18,7 @@ await serve({
 
 ## Tool input schemas
 
-`serve` checks every tool's `inputSchema` before reading stdio. It rejects unsupported keywords, arrays without an `items` schema, malformed `oneOf` (use 1 to 16 schema objects as the sole keyword), and object schemas that omit both `properties` and `additionalProperties`. Startup errors identify the tool, schema location and correction. Use `schemaError(schema)` to check a tool table before startup. It returns the first diagnostic or `undefined`.
+`serve` checks every tool's `inputSchema` before reading stdio. It rejects unsupported keywords, arrays without an `items` schema, malformed `oneOf` (use 1 to 16 schema objects as the sole keyword), and object schemas that omit both `properties` and `additionalProperties`. Use a supported `type` (or an array of supported types) for every schema other than `{}` and standalone `oneOf`. Keyword values must have the expected shape, including valid regular expression strings, finite numeric bounds, and non-negative integer counts. Startup errors identify the tool, schema location and correction. Use `schemaError(schema)` to check a tool table before startup. It returns the first diagnostic or `undefined`.
 
 An object with `properties` and no `additionalProperties` accepts only declared keys. Use `additionalProperties: false` to express this explicitly, a schema to validate extra values, or `additionalProperties: true` (equivalent to `{}`) to accept extra values subject to empty-schema safety checks.
 

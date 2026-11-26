@@ -1,4 +1,7 @@
 const schemaKeywords = ["oneOf", "type", "enum", "minLength", "maxLength", "pattern", "minimum", "maximum", "minItems", "maxItems", "items", "minProperties", "maxProperties", "required", "properties", "additionalProperties", "description", "title", "uniqueItems", "exclusiveMinimum"];
+const schemaTypes = new Set<unknown>(["string", "number", "integer", "boolean", "object", "array", "null"]);
+const numericBounds = ["minimum", "maximum", "exclusiveMinimum"];
+const countBounds = ["minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties"];
 
 const safeValue = (value: unknown, depth: number): string | undefined => {
   if (depth > 64) return "nested deeper than 64";
@@ -117,7 +120,37 @@ export function schemaError(schema: unknown): string | undefined {
       return undefined;
     }
 
-    const types = Array.isArray(raw.type) ? raw.type : [raw.type];
+    if (keys.length === 0) return undefined;
+    const types: unknown[] = Array.isArray(raw.type) ? raw.type : [raw.type];
+    if (types.length === 0 || [...types].some(type => !schemaTypes.has(type))) {
+      return `${path}.type: missing or invalid type; use a supported type name (string, number, integer, boolean, object, array, null) or a non-empty array of those names`;
+    }
+    if (Object.hasOwn(raw, "pattern")) {
+      if (typeof raw.pattern !== "string") return `${path}.pattern: invalid pattern; use a regular expression string`;
+      try { new RegExp(raw.pattern); } catch {
+        return `${path}.pattern: invalid regular expression; correct the pattern syntax`;
+      }
+    }
+    if (Object.hasOwn(raw, "required") && (!Array.isArray(raw.required) || [...raw.required].some(key => typeof key !== "string"))) {
+      return `${path}.required: invalid required list; use an array of property names as strings`;
+    }
+    if (Object.hasOwn(raw, "enum") && (!Array.isArray(raw.enum) || raw.enum.length === 0)) {
+      return `${path}.enum: invalid enum; use a non-empty array of allowed values`;
+    }
+    for (const key of numericBounds) {
+      if (Object.hasOwn(raw, key) && !Number.isFinite(raw[key])) {
+        return `${path}.${key}: invalid numeric bound; use a finite number`;
+      }
+    }
+    for (const key of countBounds) {
+      const value = raw[key];
+      if (Object.hasOwn(raw, key) && (typeof value !== "number" || !Number.isInteger(value) || value < 0)) {
+        return `${path}.${key}: invalid count bound; use a non-negative integer`;
+      }
+    }
+    if (Object.hasOwn(raw, "uniqueItems") && typeof raw.uniqueItems !== "boolean") {
+      return `${path}.uniqueItems: invalid uniqueness flag; use true or false`;
+    }
     if (types.includes("array") && !Object.hasOwn(raw, "items")) {
       return `${path}.items: array schema is missing items; add an item schema such as {}`;
     }

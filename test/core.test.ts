@@ -185,6 +185,42 @@ test("schemaError reports unsupported forms and nested paths", () => {
   }
 });
 
+test("schemaError rejects missing types and malformed keyword values", () => {
+  const cases: [unknown, string, string][] = [
+    [{ description: "x" }, "type", "supported type name"],
+    [{ enum: ["a", "b"] }, "type", "supported type name"],
+    [{ type: "int" }, "type", "supported type name"],
+    [{ type: [] }, "type", "non-empty array"],
+    [{ type: ["string", 1] }, "type", "supported type name"],
+    [{ type: "string", pattern: 1 }, "pattern", "regular expression string"],
+    [{ type: "string", pattern: "(" }, "pattern", "correct the pattern syntax"],
+    [{ type: "object", properties: {}, required: "a" }, "required", "array of property names"],
+    [{ type: "object", properties: {}, required: [1] }, "required", "array of property names"],
+    [{ type: "string", enum: "a" }, "enum", "non-empty array"],
+    [{ type: "string", enum: [] }, "enum", "non-empty array"],
+    [{ type: "number", minimum: -Infinity }, "minimum", "finite number"],
+    [{ type: "number", maximum: "2" }, "maximum", "finite number"],
+    [{ type: "number", exclusiveMinimum: NaN }, "exclusiveMinimum", "finite number"],
+    [{ type: "string", minLength: -1 }, "minLength", "non-negative integer"],
+    [{ type: "string", maxLength: 1.5 }, "maxLength", "non-negative integer"],
+    [{ type: "array", items: {}, minItems: "1" }, "minItems", "non-negative integer"],
+    [{ type: "array", items: {}, maxItems: Infinity }, "maxItems", "non-negative integer"],
+    [{ type: "object", properties: {}, minProperties: -1 }, "minProperties", "non-negative integer"],
+    [{ type: "object", properties: {}, maxProperties: 1.5 }, "maxProperties", "non-negative integer"],
+    [{ type: "array", items: {}, uniqueItems: "true" }, "uniqueItems", "true or false"],
+  ];
+  for (const [schema, keyword, fix] of cases) {
+    const error = schemaError(schema);
+    expect(error?.startsWith(`$.${keyword}:`), keyword).toBe(true);
+    expect(error).toContain(fix);
+  }
+  expect(schemaError({
+    type: ["string", "number", "object", "array"], enum: ["a", 1], pattern: "^a", required: [],
+    minimum: -2.5, maximum: 2.5, exclusiveMinimum: 0, minLength: 0, maxLength: 2,
+    items: {}, minItems: 0, maxItems: 2, uniqueItems: true, properties: {}, minProperties: 0, maxProperties: 2,
+  })).toBeUndefined();
+});
+
 test("additionalProperties true uses empty-schema validation", () => {
   for (const additionalProperties of [true, {}]) {
     const schema = { type: "object", additionalProperties };
