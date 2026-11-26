@@ -15,6 +15,7 @@ All notable changes to `@staix/mcp-stdio` are recorded here. The format follows 
 
 - `serve` now refuses unsupported or ambiguous tool input schemas at startup, before reading input. Use the exported `schemaError` to check tool tables. Existing bare object arguments, including agent-decide's `question` and `request` (agent-decide#18) and the agent-research bare-object arguments (agent-research#198), need explicit object properties or an `additionalProperties` policy.
 - `additionalProperties: true` accepts extra fields under the same safety rules as `additionalProperties: {}`.
+- Argument validation rejects NUL characters in property names, including names inside objects accepted by an empty schema.
 - Recorded transcripts keep their existing responses. The test harness declares the recorded bare objects as closed with `additionalProperties: false`, so the generated `tools/list` case advertises that explicit policy. `tools/list` still returns the supplied tool table.
 
 ## [0.1.0] - 2026-11-22
