@@ -45,9 +45,10 @@ for (const file of readdirSync("fixtures/v1").filter(name => name.endsWith(".jso
       "adec": { frameBytes: 1_048_576, resultBytes: Infinity },
     };
     const options = identity ? { ...base, name: identity[0], version: identity[1], limits: copyLimits[identity[0]] } : base;
+    const versioned = file === "2026-07-28.jsonl";
     for (const item of cases) {
       const handlers = item.fixtureKind ? { fixture: item.fixtureKind === "handler-throw" ? () => { throw Error("fixture failure"); } : item.fixtureKind === "handler-oversize" ? () => "x".repeat(item.resultBytes! + 1) : () => ({ ok: true }) } : item.handlerNames ? Object.fromEntries(item.handlerNames.map(name => [name, () => ({})])) : options.handlers;
-      const limits = item.resultBytes ? { resultBytes: item.resultBytes } : item.frameBytes ? { frameBytes: item.frameBytes } : options.limits;
+      const limits = versioned ? { ...options.limits, toolFrameBytes: undefined } : item.resultBytes ? { resultBytes: item.resultBytes } : item.frameBytes ? { frameBytes: item.frameBytes } : options.limits;
       const failureText = item.fixtureKind ? (error: unknown) => error instanceof ResultTooLarge ? item.limitText : undefined : options.failureText;
       const [result] = await runTranscripts([item], { ...options, tools: item.tools ? normalizeRecordedTools(item.tools) : options.tools, handlers, limits, failureText });
       expect(result.actual, result.id).toBe(item.packageOutput ?? result.expected);
@@ -71,9 +72,13 @@ test("shared cases run with each consumer's options and tool schemas", async () 
   for (const copy of copies) {
     const results = await runTranscripts({ name: copy.name, version: "fixture", tools: copy.tools, handlers: Object.fromEntries(copy.tools.map(tool => [tool.name, () => ({})])), instructions: copy.instructions,
       limits: { frameBytes: copy.frameBytes, resultBytes: copy.resultBytes, toolFrameBytes: copy.toolFrameBytes },
+      listCache: { ttlMs: 500, cacheScope: "public" },
       failureText: error => error instanceof ResultTooLarge ? "result limit" : (error as { code?: string }).code === "candidate_queue_full" ? "queue full" : undefined,
     });
     expect(results.some(result => result.id === "2025-11-25-argument-validation")).toBe(true);
+    expect(results.find(result => result.id === "2026-07-28-emitted-observation")?.actual).toBe("1");
+    const list = results.find(result => result.id === "2026-07-28-list-cache");
+    expect(JSON.parse(list!.actual).result).toMatchObject({ ttlMs: 500, cacheScope: "public" });
     for (const result of results) expect(result.actual, `${copy.name}:${result.id}`).toBe(result.expected);
   }
 });

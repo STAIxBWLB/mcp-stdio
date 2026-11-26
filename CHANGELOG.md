@@ -4,6 +4,10 @@ All notable changes to `@staix/mcp-stdio` are recorded here. The format follows 
 
 ## [Unreleased]
 
+- Support stateless MCP `2026-07-28` alongside the initialize-era revisions, including `server/discover`, per-request metadata validation and stateless result metadata. Initialize-era responses are preserved. After a process selects an era, requests in the other era are rejected.
+- The exported `PROTOCOL_VERSIONS` now starts with `2026-07-28`. The preferred revision for `initialize` remains `2025-11-25`.
+- Add `listCache` for stateless `tools/list`. Tool listings and discovery default to private caching with a zero TTL.
+
 - `initialize` prefers `2025-11-25` when the requested revision is unsupported. In sessions negotiated at `2025-11-25`, tool input schema failures return a tool result with `isError: true` and the validation message (SEP-1303). Earlier revisions keep their JSON-RPC validation errors.
 - The `Tool` type supports optional titles, icons, output schemas and annotation titles.
 

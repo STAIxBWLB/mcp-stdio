@@ -41,7 +41,9 @@ test("writeConfirmed waits for the write callback", async () => {
 test("initialize requires capabilities and client info and negotiates protocol", async () => {
   const { initialize } = await import("../src/initialize.ts");
   expect(initialize({ protocolVersion: "unknown" }, "example", "1")).toBeUndefined();
-  expect(initialize({ protocolVersion: "unknown", capabilities: {}, clientInfo: {} }, "example", "1")?.protocolVersion).toBe("2025-11-25");
+  for (const protocolVersion of ["unknown", "2026-07-28"]) {
+    expect(initialize({ protocolVersion, capabilities: {}, clientInfo: {} }, "example", "1")?.protocolVersion).toBe("2025-11-25");
+  }
 });
 
 test("tool argument errors use the revision negotiated at initialization", async () => {
@@ -110,7 +112,7 @@ test("shared conformance uses consumer tools for protocol and fixture handlers f
   });
   for (const result of results) expect(result.actual, result.id).toBe(result.expected);
   expect(results.some(result => result.id === "tool-frame-bound")).toBe(true);
-  expect(observed).toEqual(["echo"]);
+  expect(observed).toEqual(Array(6).fill("echo"));
 });
 
 test("exclusive minimum and unique arrays are enforced", () => {
@@ -271,4 +273,38 @@ test("serve rejects an invalid tool schema before reading or writing", async () 
   })).rejects.toThrow(/Tool "invalid" inputSchema at \$\.properties\["arg"\].*declare properties/);
   expect(reads).toBe(0);
   expect(writes).toBe(0);
+});
+
+test("stateless tool calls observe confirmed successes and shape handler failures", async () => {
+  const { serve } = await import("../src/index.ts");
+  const line = (value: unknown) => JSON.stringify(value) + "\n";
+  const call = (id: number, name: string) => line({ jsonrpc: "2.0", id, method: "tools/call", params: {
+    name, _meta: {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": {},
+    },
+  } });
+  const events: string[] = [];
+  const responses: { id: number; result: unknown }[] = [];
+  const output = new Writable({ write(chunk, _encoding, callback) {
+    const message = JSON.parse(chunk.toString());
+    responses.push(message);
+    const confirm = () => { events.push(`write:${message.id}`); callback(); };
+    if (message.id === 1) setImmediate(confirm);
+    else confirm();
+  } });
+  await serve({
+    name: "fixture", version: "1", input: Readable.from([call(1, "ok") + call(2, "fail")]), output,
+    tools: ["ok", "fail"].map(name => ({ name, description: "", inputSchema: { type: "object", additionalProperties: false } })),
+    handlers: { ok: () => ({ ok: true }), fail: () => { throw Error("internal detail"); } },
+    failureText: () => "safe refusal",
+    onEmitted: (_tool, id) => { events.push(`observed:${id}`); },
+  });
+  expect(events).toEqual(["write:1", "observed:1", "write:2"]);
+  expect(responses[1]?.result).toEqual({
+    resultType: "complete",
+    isError: true,
+    content: [{ type: "text", text: "safe refusal" }],
+    _meta: { "io.modelcontextprotocol/serverInfo": { name: "fixture", version: "1" } },
+  });
 });

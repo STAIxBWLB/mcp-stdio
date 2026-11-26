@@ -72,13 +72,6 @@ export async function runConformance(options: Omit<ServeOptions, "input" | "outp
     const call = request(2, "tools/call", { name: boundedName, arguments: { text: "x".repeat(bound) } });
     if (Buffer.byteLength(call) - 1 <= frameBytes) add("tool-frame-bound", ready + call, initialized + err(2, -32600, `${boundedName} request exceeds ${bound % 1024 === 0 ? `${bound / 1024} KiB` : `${bound} bytes`} as the frame it was sent in; shorten the request or split the batch`), boundedOptions);
   }
-  const results: TranscriptResult[] = [];
-  for (const { item, options: selected } of cases) {
-    let observed = 0;
-    const current = item.id === "emitted" ? { ...selected, onEmitted: async (tool: string, id: string | number, value: unknown) => { observed++; await selected.onEmitted?.(tool, id, value); } } : selected;
-    results.push(...await runTranscripts([item], current));
-    if (item.id === "emitted") results.push({ id: "emitted-observation", expected: "1", actual: String(observed), passed: observed === 1 });
-  }
   const versionedFixture = await readFile(new URL("../fixtures/v1/2025-11-25.jsonl", import.meta.url), "utf8");
   const versionedCases: TranscriptCase[] = versionedFixture.trimEnd().split("\n").map(line => {
     const item = JSON.parse(line) as TranscriptCase;
@@ -86,6 +79,40 @@ export async function runConformance(options: Omit<ServeOptions, "input" | "outp
     const output = initializeResponse("2025-11-25") + item.output.slice(item.output.indexOf("\n") + 1);
     return { ...item, output };
   });
-  results.push(...await runTranscripts(versionedCases, fixtureOptions));
+  for (const item of versionedCases) cases.push({ item, options: fixtureOptions });
+  const statelessFixture = await readFile(new URL("../fixtures/v1/2026-07-28.jsonl", import.meta.url), "utf8");
+  for (const entry of statelessFixture.trimEnd().split("\n")) {
+    const item = JSON.parse(entry) as TranscriptCase;
+    const output = item.output.trimEnd().split("\n").map(row => {
+      const message = JSON.parse(row);
+      const result = message.result;
+      const serverInfo = { name: options.name, version: options.version };
+      if (result?.serverInfo) result.serverInfo = serverInfo;
+      if (result?._meta) result._meta["io.modelcontextprotocol/serverInfo"] = serverInfo;
+      if (result?.tools && options.listCache) {
+        result.ttlMs = options.listCache.ttlMs;
+        result.cacheScope = options.listCache.cacheScope;
+      }
+      if (result?.supportedVersions || result?.serverInfo) {
+        if (options.instructions !== undefined) {
+          // Keep instructions before cache fields in the discovery response.
+          if (result.supportedVersions) {
+            const { ttlMs, cacheScope, _meta, ...discovery } = result;
+            message.result = { ...discovery, instructions: options.instructions, ttlMs, cacheScope, _meta };
+          } else result.instructions = options.instructions;
+        }
+      }
+      return line(message);
+    }).join("");
+    cases.push({ item: { ...item, output }, options: fixtureOptions });
+  }
+  const results: TranscriptResult[] = [];
+  for (const { item, options: selected } of cases) {
+    let observed = 0;
+    const observes = item.id === "emitted" || item.id === "2026-07-28-emitted";
+    const current = observes ? { ...selected, onEmitted: async (tool: string, id: string | number, value: unknown) => { observed++; await selected.onEmitted?.(tool, id, value); } } : selected;
+    results.push(...await runTranscripts([item], current));
+    if (observes) results.push({ id: `${item.id}-observation`, expected: "1", actual: String(observed), passed: observed === 1 });
+  }
   return results;
 }
