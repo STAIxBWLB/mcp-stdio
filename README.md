@@ -16,9 +16,29 @@ await serve({
 
 `validArguments(value, schema)` and `argumentError(value, schema)` validate the bounded schema vocabulary. `writeConfirmed(output, text)`, `PROTOCOL_VERSIONS`, `ERROR` and `ResultTooLarge` are also exported. `runTranscripts(options)` runs the shared protocol cases against the consumer tool table and the handler-dependent cases with fixture tools, retaining the consumer options. `runTranscripts(cases, options)` replays recorded input/output streams and returns exact comparison results.
 
+To return an application-defined refusal in the tool result's text block, provide a `failureText` mapper. Use a trusted error type for messages intended for clients and bound the length before serializing. Other errors retain the default opaque message.
+
+```ts
+class ToolRefusal extends Error {}
+
+const failureText = (error: unknown) => error instanceof ToolRefusal
+  ? JSON.stringify({ refused: true, issues: [error.message.slice(0, 200)] })
+  : undefined;
+```
+
 ## Protocol negotiation
 
 `2025-11-25` is the preferred initialize-era revision. The server also negotiates `2025-06-18`, `2025-03-26`, and `2024-11-05` when requested. Under `2025-11-25`, arguments that fail a tool's input schema produce a tool result with `isError: true` and a text diagnostic ([SEP-1303](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#error-handling)). Unknown tools and malformed `tools/call` parameters use JSON-RPC `-32602`. Earlier negotiated revisions also use `-32602` for schema validation failures.
+
+| Revision | stdio entry | Schema validation failure |
+| --- | --- | --- |
+| `2026-07-28` | Per-request metadata, with optional `server/discover` | Tool result with `isError: true` |
+| `2025-11-25` | `initialize` and `notifications/initialized` | Tool result with `isError: true` |
+| `2025-06-18`, `2025-03-26`, `2024-11-05` | `initialize` and `notifications/initialized` | JSON-RPC `-32602` |
+
+For `2026-07-28`, send `io.modelcontextprotocol/protocolVersion` and `io.modelcontextprotocol/clientCapabilities` in `params._meta` on every request. A missing required field yields `-32602`. An unsupported version yields `-32022` with the supported versions. `server/discover` and pre-initialize legacy `ping` leave the era undecided. The first initialize handshake or stateless operation selects the era for that stdio process. The stateless era has no `ping`; use `server/discover` to query server information.
+
+Stateless results include `resultType: "complete"` and server identity in `_meta`. Discovery and tool listings default to `ttlMs: 0` and `cacheScope: "private"`. Set `listCache` to change those values for stateless `tools/list`.
 
 Tool definitions can include `title`, `icons`, `outputSchema`, and annotations with a display title and boolean hints.
 
