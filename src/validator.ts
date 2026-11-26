@@ -1,3 +1,5 @@
+const schemaKeywords = ["oneOf", "type", "enum", "minLength", "maxLength", "pattern", "minimum", "maximum", "minItems", "maxItems", "items", "minProperties", "maxProperties", "required", "properties", "additionalProperties", "description", "title", "uniqueItems", "exclusiveMinimum"];
+
 const safeValue = (value: unknown, depth: number): string | undefined => {
   if (depth > 64) return "nested deeper than 64";
   if (typeof value === "string") return value.includes("\0") ? "unsafe value" : undefined;
@@ -8,7 +10,7 @@ const safeValue = (value: unknown, depth: number): string | undefined => {
   }
   if (plain(value)) {
     for (const key of Object.keys(value)) {
-      if (["__proto__", "prototype", "constructor"].includes(key)) return "unsafe value";
+      if (key.includes("\0") || ["__proto__", "prototype", "constructor"].includes(key)) return "unsafe value";
       const error = safeValue(value[key], depth + 1); if (error) return error;
     }
     return undefined;
@@ -37,8 +39,7 @@ export function argumentError(value: unknown, raw: unknown, path = "", defaultSt
     if (Object.keys(raw).length !== 1 || !Array.isArray(raw.oneOf) || !raw.oneOf.length || raw.oneOf.length > 16 || raw.oneOf.some(branch => !plain(branch))) return fail("invalid oneOf schema");
     return raw.oneOf.filter(branch => argumentError(value, branch, path, defaultStringLength, depth) === undefined).length === 1 ? undefined : fail("expected exactly one matching schema");
   }
-  const allowed = ["type", "enum", "minLength", "maxLength", "pattern", "minimum", "maximum", "minItems", "maxItems", "items", "minProperties", "maxProperties", "required", "properties", "additionalProperties", "description", "title", "uniqueItems", "exclusiveMinimum"];
-  if (Object.keys(raw).some(key => !allowed.includes(key))) return fail("unknown schema keyword; use a supported keyword");
+  if (Object.keys(raw).some(key => !schemaKeywords.includes(key))) return fail("unknown schema keyword; use a supported keyword");
   const s = raw as Record<string, any>, type = value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
   const types: unknown[] = Array.isArray(s.type) ? s.type : [s.type];
   if (!types.includes(type) && !(type === "number" && Number.isSafeInteger(value) && types.includes("integer"))) return fail(`expected ${types.join(" or ")}`);
@@ -73,16 +74,75 @@ export function argumentError(value: unknown, raw: unknown, path = "", defaultSt
     for (const key of keys) {
       if (key.length > 200) return fail("property name longer than 200");
       const child = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? (path ? `${path}.${key}` : key) : `${path || "$"}[${JSON.stringify(key)}]`;
-      if (["__proto__", "prototype", "constructor"].includes(key)) return `${child}: forbidden property name`;
+      if (key.includes("\0") || ["__proto__", "prototype", "constructor"].includes(key)) return `${child}: forbidden property name`;
       let schema;
       if (Object.hasOwn(s.properties ?? {}, key)) schema = s.properties[key];
-      else if (s.additionalProperties === false || !plain(s.additionalProperties)) return `${path ? path + ": " : ""}unknown argument: ${key}`;
+      else if (s.additionalProperties === true) schema = {};
+      else if (!plain(s.additionalProperties)) return `${path ? path + ": " : ""}unknown argument: ${key}`;
       else schema = s.additionalProperties;
       const error = argumentError(value[key], schema, child, defaultStringLength, depth + 1);
       if (error) return error;
     }
   } else if (type === "object") return fail("expected plain object");
   return undefined;
+}
+/** First unsupported schema form, with its location and a suggested fix. */
+export function schemaError(schema: unknown): string | undefined {
+  const ancestors = new Set<Record<string, unknown>>();
+  const check = (raw: unknown, path: string): string | undefined => {
+    if (!plain(raw)) return `${path}: expected a schema object; use an object such as {}`;
+    if (ancestors.has(raw)) return `${path}: circular schema; use a finite schema tree`;
+    ancestors.add(raw);
+    try {
+      return checkNode(raw, path);
+    } finally {
+      ancestors.delete(raw);
+    }
+  };
+
+  const checkNode = (raw: Record<string, unknown>, path: string): string | undefined => {
+    const keys = Object.keys(raw);
+    const unknown = keys.find(key => !schemaKeywords.includes(key));
+    if (unknown !== undefined) return `${path}[${JSON.stringify(unknown)}]: unsupported keyword; remove it or use a supported keyword`;
+
+    if (Object.hasOwn(raw, "oneOf")) {
+      const branches = raw.oneOf;
+      if (keys.length !== 1 || !Array.isArray(branches) || branches.length < 1 || branches.length > 16) {
+        return `${path}.oneOf: invalid oneOf; use 1 to 16 schema objects and no sibling keywords`;
+      }
+      for (let i = 0; i < branches.length; i++) {
+        const error = check(branches[i], `${path}.oneOf[${i}]`);
+        if (error) return error;
+      }
+      return undefined;
+    }
+
+    const types = Array.isArray(raw.type) ? raw.type : [raw.type];
+    if (types.includes("array") && !Object.hasOwn(raw, "items")) {
+      return `${path}.items: array schema is missing items; add an item schema such as {}`;
+    }
+    if (types.includes("object") && !Object.hasOwn(raw, "properties") && !Object.hasOwn(raw, "additionalProperties")) {
+      return `${path}: object schema is missing properties and additionalProperties; declare properties or set additionalProperties explicitly`;
+    }
+
+    if (Object.hasOwn(raw, "properties")) {
+      if (!plain(raw.properties)) return `${path}.properties: invalid properties; use an object mapping names to schemas`;
+      for (const [name, child] of Object.entries(raw.properties)) {
+        const error = check(child, `${path}.properties[${JSON.stringify(name)}]`);
+        if (error) return error;
+      }
+    }
+    if (Object.hasOwn(raw, "items")) {
+      const error = check(raw.items, `${path}.items`);
+      if (error) return error;
+    }
+    if (Object.hasOwn(raw, "additionalProperties") && typeof raw.additionalProperties !== "boolean") {
+      return check(raw.additionalProperties, `${path}.additionalProperties`);
+    }
+    return undefined;
+  };
+
+  return check(schema, "$");
 }
 /** Boolean compatibility API for the same closed, bounded schema vocabulary. */
 export function validArguments(value: unknown, raw: unknown, defaultStringLength = 65_536): boolean { return argumentError(value, raw, "", defaultStringLength) === undefined; }

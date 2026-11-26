@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Readable, Writable } from "node:stream";
 import { readFrames } from "../src/framing.ts";
-import { argumentError, validArguments, writeConfirmed } from "../src/index.ts";
+import { argumentError, schemaError, validArguments, writeConfirmed } from "../src/index.ts";
 
 describe("validator", () => {
   test("validates union branches, limits and unsafe values", () => {
@@ -78,7 +78,7 @@ test("shared conformance uses consumer tools for protocol and fixture handlers f
   const observed: string[] = [];
   const results = await runTranscripts({
     name: "consumer", version: "2", instructions: "fixture instructions",
-    tools: [{ name: "special", description: "real tool", inputSchema: { type: "object" } }],
+    tools: [{ name: "special", description: "real tool", inputSchema: { type: "object", additionalProperties: false } }],
     handlers: { special: () => { throw Error("notification invoked a handler"); } },
     limits: { frameBytes: 1024, resultBytes: 128, toolFrameBytes: name => name === "special" ? 512 : undefined },
     failureText: error => error instanceof ResultTooLarge ? "limited" : (error as { code?: string }).code === "candidate_queue_full" ? "queue full" : undefined,
@@ -153,4 +153,62 @@ test("unbounded result limit preserves large successful results", async () => {
   expect(result.isError).toBeUndefined();
   expect(JSON.parse(result.content[0].text).length).toBe(300_000);
   expect(validArguments("abcd", { type: "string" }, 3)).toBe(false);
+});
+
+test("schemaError reports unsupported forms and nested paths", () => {
+  const cases: [unknown, string, string][] = [
+    [{ type: "string", format: "uri" }, '$["format"]', "supported keyword"],
+    [{ type: ["array", "null"] }, "$.items", "add an item schema"],
+    [{ oneOf: [] }, "$.oneOf", "1 to 16 schema objects"],
+    [{ oneOf: [{}], type: "string" }, "$.oneOf", "no sibling keywords"],
+    [{ oneOf: [false] }, "$.oneOf[0]", "expected a schema object"],
+    [{ type: ["object", "null"] }, "$", "declare properties"],
+    [{ type: "object", properties: { "a.b": { type: "object" } } }, '$.properties["a.b"]', "declare properties"],
+    [{ type: "array", items: { type: "array" } }, "$.items.items", "add an item schema"],
+    [{ type: "object", additionalProperties: { type: "object" } }, "$.additionalProperties", "declare properties"],
+    [{ oneOf: [{ type: "object" }] }, "$.oneOf[0]", "declare properties"],
+  ];
+  for (const [schema, path, fix] of cases) {
+    const error = schemaError(schema);
+    expect(error?.startsWith(path + ":")).toBe(true);
+    expect(error).toContain(fix);
+  }
+  for (const schema of [
+    {},
+    { type: "object", properties: { name: { type: "string" } } },
+    { type: "object", additionalProperties: false },
+    { type: "object", additionalProperties: true },
+    { type: "object", additionalProperties: {} },
+    { oneOf: [{ type: ["array", "null"], items: {} }, { type: "string" }] },
+  ]) {
+    expect(schemaError(schema)).toBeUndefined();
+  }
+});
+
+test("additionalProperties true uses empty-schema validation", () => {
+  for (const additionalProperties of [true, {}]) {
+    const schema = { type: "object", additionalProperties };
+    expect(validArguments({ a: 1 }, schema)).toBe(true);
+    expect(validArguments({ a: "\0" }, schema)).toBe(false);
+    expect(validArguments({ ["a\0"]: 1 }, schema)).toBe(false);
+    expect(validArguments({ a: { ["b\0"]: 1 } }, schema)).toBe(false);
+    expect(validArguments({ ["__proto__"]: 1 }, schema)).toBe(false);
+  }
+});
+
+test("serve rejects an invalid tool schema before reading or writing", async () => {
+  const { serve } = await import("../src/index.ts");
+  let reads = 0, writes = 0;
+  const input = new Readable({ read() { reads++; this.push(null); } });
+  const output = new Writable({ write(_chunk, _encoding, callback) { writes++; callback(); } });
+  await expect(serve({
+    name: "fixture", version: "1", input, output,
+    tools: [
+      { name: "valid", description: "", inputSchema: { type: "object", properties: {} } },
+      { name: "invalid", description: "", inputSchema: { type: "object", properties: { arg: { type: "object" } } } },
+    ],
+    handlers: {},
+  })).rejects.toThrow(/Tool "invalid" inputSchema at \$\.properties\["arg"\].*declare properties/);
+  expect(reads).toBe(0);
+  expect(writes).toBe(0);
 });

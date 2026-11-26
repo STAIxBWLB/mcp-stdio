@@ -3,7 +3,7 @@ import { once } from "node:events";
 import type { Readable, Writable } from "node:stream";
 import { readFrames } from "./framing.ts";
 import { initialize } from "./initialize.ts";
-import { argumentError } from "./validator.ts";
+import { argumentError, schemaError } from "./validator.ts";
 import { writeConfirmed } from "./write-confirmed.ts";
 
 export const ERROR = { PARSE_ERROR: -32700, INVALID_REQUEST: -32600, METHOD_NOT_FOUND: -32601, INTERNAL_ERROR: -32603, INVALID_PARAMS: -32602, NOT_INITIALIZED: -32002 } as const;
@@ -24,6 +24,10 @@ const plain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 
 /** MCP basic/transports: newline stdio only. Sequential, bounded, no listener or timer. */
 export async function serve(options: ServeOptions): Promise<void> {
+  for (const tool of options.tools) {
+    const invalid = schemaError(tool.inputSchema);
+    if (invalid) throw new Error(`Tool ${JSON.stringify(tool.name)} inputSchema at ${invalid}`);
+  }
   const input = options.input ?? process.stdin, output = options.output ?? process.stdout;
   const frameBytes = options.limits?.frameBytes ?? 65_536, resultBytes = options.limits?.resultBytes ?? 262_144;
   let phase: "new" | "initializing" | "ready" = "new";

@@ -10,6 +10,29 @@ const base: Omit<ServeOptions, "input" | "output" | "close"> = {
   limits: { frameBytes: 512, resultBytes: 100, toolFrameBytes: name => name === "echo" ? 180 : undefined },
   failureText: error => error instanceof ResultTooLarge ? "too large" : (error as { code?: string })?.code === "named" ? "named failure" : undefined,
 };
+// Recorded bare object schemas were enforced as closed objects.
+function recordedSchema(schema: Record<string, unknown>): Record<string, unknown> {
+  const normalized = { ...schema };
+  const child = (value: unknown): unknown => value && typeof value === "object" && !Array.isArray(value)
+    ? recordedSchema(value as Record<string, unknown>)
+    : value;
+  if (normalized.properties && typeof normalized.properties === "object") {
+    normalized.properties = Object.fromEntries(Object.entries(normalized.properties).map(([key, value]) => [key, child(value)]));
+  }
+  if (Object.hasOwn(normalized, "items")) normalized.items = child(normalized.items);
+  if (Object.hasOwn(normalized, "additionalProperties")) normalized.additionalProperties = child(normalized.additionalProperties);
+  if (Array.isArray(normalized.oneOf)) normalized.oneOf = normalized.oneOf.map(child);
+  const types = Array.isArray(normalized.type) ? normalized.type : [normalized.type];
+  if (types.includes("object") && !Object.hasOwn(normalized, "properties") && !Object.hasOwn(normalized, "additionalProperties")) {
+    normalized.additionalProperties = false;
+  }
+  return normalized;
+}
+
+function normalizeRecordedTools(tools: ServeOptions["tools"]): ServeOptions["tools"] {
+  return tools.map(tool => ({ ...tool, inputSchema: recordedSchema(tool.inputSchema) }));
+}
+
 for (const file of readdirSync("fixtures/v1").filter(name => name.endsWith(".jsonl"))) {
   test(file, async () => {
     const cases = readFileSync(`fixtures/v1/${file}`, "utf8").trim().split("\n").map(line => JSON.parse(line) as TranscriptCase & { packageOutput?: string; tools?: ServeOptions["tools"]; frameBytes?: number; handlerNames?: string[]; fixtureKind?: string; resultBytes?: number; limitText?: string });
@@ -26,7 +49,7 @@ for (const file of readdirSync("fixtures/v1").filter(name => name.endsWith(".jso
       const handlers = item.fixtureKind ? { fixture: item.fixtureKind === "handler-throw" ? () => { throw Error("fixture failure"); } : item.fixtureKind === "handler-oversize" ? () => "x".repeat(item.resultBytes! + 1) : () => ({ ok: true }) } : item.handlerNames ? Object.fromEntries(item.handlerNames.map(name => [name, () => ({})])) : options.handlers;
       const limits = item.resultBytes ? { resultBytes: item.resultBytes } : item.frameBytes ? { frameBytes: item.frameBytes } : options.limits;
       const failureText = item.fixtureKind ? (error: unknown) => error instanceof ResultTooLarge ? item.limitText : undefined : options.failureText;
-      const [result] = await runTranscripts([item], { ...options, tools: item.tools ?? options.tools, handlers, limits, failureText });
+      const [result] = await runTranscripts([item], { ...options, tools: item.tools ? normalizeRecordedTools(item.tools) : options.tools, handlers, limits, failureText });
       expect(result.actual, result.id).toBe(item.packageOutput ?? result.expected);
     }
   });
@@ -36,9 +59,9 @@ test("shared cases run with each consumer's options and tool schemas", async () 
   const data = JSON.parse(readFileSync("test/schema-samples.json", "utf8")) as { rows: { name: string; schema: Record<string, unknown> }[] };
   const recordedTools = (file: string) => {
     const cases = readFileSync(`fixtures/v1/${file}.jsonl`, "utf8").trim().split("\n").map(line => JSON.parse(line));
-    return cases.find(item => item.tools?.length)?.tools as ServeOptions["tools"];
+    return normalizeRecordedTools(cases.find(item => item.tools?.length)?.tools as ServeOptions["tools"]);
   };
-  const schemas = (prefix: string) => data.rows.filter(row => row.name.startsWith(`${prefix}:`)).map(row => ({ name: row.name.slice(prefix.length + 1), description: "", inputSchema: row.schema }));
+  const schemas = (prefix: string) => data.rows.filter(row => row.name.startsWith(`${prefix}:`)).map(row => ({ name: row.name.slice(prefix.length + 1), description: "", inputSchema: recordedSchema(row.schema) }));
   const copies = [
     { name: "amem", tools: recordedTools("agent-mem"), frameBytes: 65_536, resultBytes: 262_144 },
     { name: "vault-mem", tools: schemas("vault"), frameBytes: 65_536, resultBytes: 262_144, instructions: "fixture instructions", toolFrameBytes: (name: string) => name.startsWith("vmem_proposal_") || ["vmem_assert", "vmem_assertions", "vmem_assertions_purge", "vmem_assertions_exposure"].includes(name) ? 48 * 1024 : undefined },
