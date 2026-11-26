@@ -16,6 +16,12 @@ await serve({
 
 `validArguments(value, schema)` and `argumentError(value, schema)` validate the bounded schema vocabulary. `writeConfirmed(output, text)`, `PROTOCOL_VERSIONS`, `ERROR` and `ResultTooLarge` are also exported. `runTranscripts(options)` runs the shared protocol cases against the consumer tool table and the handler-dependent cases with fixture tools, retaining the consumer options. `runTranscripts(cases, options)` replays recorded input/output streams and returns exact comparison results.
 
+## Protocol negotiation
+
+`2025-11-25` is the preferred initialize-era revision. The server also negotiates `2025-06-18`, `2025-03-26`, and `2024-11-05` when requested. Under `2025-11-25`, arguments that fail a tool's input schema produce a tool result with `isError: true` and a text diagnostic ([SEP-1303](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#error-handling)). Unknown tools and malformed `tools/call` parameters use JSON-RPC `-32602`. Earlier negotiated revisions also use `-32602` for schema validation failures.
+
+Tool definitions can include `title`, `icons`, `outputSchema`, and annotations with a display title and boolean hints.
+
 ## Tool input schemas
 
 `serve` checks every tool's `inputSchema` before reading stdio. It rejects unsupported keywords, arrays without an `items` schema, malformed `oneOf` (use 1 to 16 schema objects as the sole keyword), and object schemas that omit both `properties` and `additionalProperties`. Use a supported `type` (or an array of supported types) for every schema other than `{}` and standalone `oneOf`. Keyword values must have the expected shape, including valid regular expression strings, finite numeric bounds, and non-negative integer counts. Startup errors identify the tool, schema location and correction. Use `schemaError(schema)` to check a tool table before startup. It returns the first diagnostic or `undefined`.

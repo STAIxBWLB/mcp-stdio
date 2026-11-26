@@ -73,6 +73,7 @@ test("shared cases run with each consumer's options and tool schemas", async () 
       limits: { frameBytes: copy.frameBytes, resultBytes: copy.resultBytes, toolFrameBytes: copy.toolFrameBytes },
       failureText: error => error instanceof ResultTooLarge ? "result limit" : (error as { code?: string }).code === "candidate_queue_full" ? "queue full" : undefined,
     });
+    expect(results.some(result => result.id === "2025-11-25-argument-validation")).toBe(true);
     for (const result of results) expect(result.actual, `${copy.name}:${result.id}`).toBe(result.expected);
   }
 });

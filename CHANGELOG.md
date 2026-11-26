@@ -4,6 +4,9 @@ All notable changes to `@staix/mcp-stdio` are recorded here. The format follows 
 
 ## [Unreleased]
 
+- `initialize` prefers `2025-11-25` when the requested revision is unsupported. In sessions negotiated at `2025-11-25`, tool input schema failures return a tool result with `isError: true` and the validation message (SEP-1303). Earlier revisions keep their JSON-RPC validation errors.
+- The `Tool` type supports optional titles, icons, output schemas and annotation titles.
+
 - `serve` now refuses unsupported or ambiguous tool input schemas at startup, before reading input. Use the exported `schemaError` to check tool tables. Existing bare object arguments, including agent-decide's `question` and `request` (agent-decide#18) and the agent-research bare-object arguments (agent-research#198), need explicit object properties or an `additionalProperties` policy.
 - `additionalProperties: true` accepts extra fields under the same safety rules as `additionalProperties: {}`.
 - Recorded transcripts keep their existing responses. The test harness declares the recorded bare objects as closed with `additionalProperties: false`, so the generated `tools/list` case advertises that explicit policy. `tools/list` still returns the supplied tool table.

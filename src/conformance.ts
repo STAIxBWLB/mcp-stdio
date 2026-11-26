@@ -1,9 +1,10 @@
 import { OPAQUE_FAILURE } from "./messages.ts";
+import { readFile } from "node:fs/promises";
 import { Readable, Writable } from "node:stream";
 import { serve, ResultTooLarge, type ServeOptions } from "./server.ts";
 
 /** A recorded request stream and its exact response stream. */
-export interface TranscriptCase { id: string; input: string | number[] | { repeat: string; count: number; suffix: string }; output: string; packageOutput?: string }
+export interface TranscriptCase { id: string; input: string | number[] | { repeat: string; count: number; suffix: string }; output: string; packageOutput?: string; spec?: string }
 export interface TranscriptResult { id: string; expected: string; actual: string; passed: boolean }
 /** Replay transcript cases against a consumer's actual tool table and options. */
 export function runTranscripts(options: Omit<ServeOptions, "input" | "output" | "close">): Promise<TranscriptResult[]>;
@@ -30,7 +31,8 @@ export async function runConformance(options: Omit<ServeOptions, "input" | "outp
   const response = (id: number | null, result: unknown) => line({ jsonrpc: "2.0", id, result });
   const err = (id: number | null, code: number, message: string) => line({ jsonrpc: "2.0", id, error: { code, message } });
   const ready = request(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: {} }) + line({ jsonrpc: "2.0", method: "notifications/initialized" });
-  const initialized = response(1, { protocolVersion: "2025-06-18", capabilities: { tools: { listChanged: false } }, serverInfo: { name: options.name, version: options.version }, ...(options.instructions === undefined ? {} : { instructions: options.instructions }) });
+  const initializeResponse = (protocolVersion: string) => response(1, { protocolVersion, capabilities: { tools: { listChanged: false } }, serverInfo: { name: options.name, version: options.version }, ...(options.instructions === undefined ? {} : { instructions: options.instructions }) });
+  const initialized = initializeResponse("2025-06-18");
   const frameBytes = options.limits?.frameBytes ?? 65_536;
   const resultBytes = options.limits?.resultBytes ?? 262_144;
   const cases: { item: TranscriptCase; options: Omit<ServeOptions, "input" | "output" | "close"> }[] = [];
@@ -77,5 +79,13 @@ export async function runConformance(options: Omit<ServeOptions, "input" | "outp
     results.push(...await runTranscripts([item], current));
     if (item.id === "emitted") results.push({ id: "emitted-observation", expected: "1", actual: String(observed), passed: observed === 1 });
   }
+  const versionedFixture = await readFile(new URL("../fixtures/v1/2025-11-25.jsonl", import.meta.url), "utf8");
+  const versionedCases: TranscriptCase[] = versionedFixture.trimEnd().split("\n").map(line => {
+    const item = JSON.parse(line) as TranscriptCase;
+    // The fixture starts with initialize. Adapt only its server identity and instructions.
+    const output = initializeResponse("2025-11-25") + item.output.slice(item.output.indexOf("\n") + 1);
+    return { ...item, output };
+  });
+  results.push(...await runTranscripts(versionedCases, fixtureOptions));
   return results;
 }
