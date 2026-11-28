@@ -133,7 +133,7 @@ export async function serve(options: ServeOptions): Promise<void> {
     }
     if (!modern && phase !== "ready") { await error(id, ERROR.NOT_INITIALIZED, "Initialize the session first"); return; }
     if (msg.method === "tools/list") {
-      if (params !== undefined && params !== null && (!plain(params) || Object.keys(params).some(key => key !== "cursor" && key !== "_meta") || params.cursor !== undefined && params.cursor !== null || !modern && params._meta !== undefined && (!plain(params._meta) || Object.keys(params._meta).length > 0))) { await error(id, ERROR.INVALID_PARAMS, "Invalid tool listing arguments"); return; }
+      if (params !== undefined && params !== null && (!plain(params) || Object.keys(params).some(key => key !== "cursor" && key !== "_meta") || params.cursor !== undefined && params.cursor !== null || !modern && params._meta !== undefined && !plain(params._meta))) { await error(id, ERROR.INVALID_PARAMS, "Invalid tool listing arguments"); return; }
       const result = { tools: options.tools };
       await send({ jsonrpc: "2.0", id, result: modern ? complete({ ...result, ...(options.listCache ?? NO_CACHE) }) : result });
       return;
