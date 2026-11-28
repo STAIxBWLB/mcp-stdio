@@ -30,8 +30,8 @@ const failureText = (error: unknown) => error instanceof ToolRefusal
 
 These rules hold for every change to the package:
 
-1. What `tools/list` advertises is what `tools/call` enforces. `serve` refuses at startup any schema the core would read differently from JSON Schema; this never surfaces at call time.
-2. A response depends only on the request and the negotiated protocol version. Behaviour added for a newer revision is gated on that revision, so a session on an older revision keeps byte-identical responses.
+1. What `tools/list` advertises is what `tools/call` enforces. `serve` refuses ambiguous schema forms at startup (see Tool input schemas), not at call time. One difference from JSON Schema remains: an object with `properties` and no `additionalProperties` is closed. Declare `additionalProperties` explicitly so that clients read the schema the same way.
+2. Given the same request, server options and handler result, the core's response depends only on the negotiated protocol version. Behaviour added for a newer revision is gated on that revision, so a session on an older revision keeps byte-identical protocol responses.
 3. Transcripts are per protocol version. Supporting a new MCP revision adds transcript files and never edits existing ones. Within a major version, an existing expected response changes only for a bug fix, which the CHANGELOG records.
 4. The API changes only additively. New `ServeOptions` and `Tool` fields are optional, and their defaults keep current behaviour.
 
