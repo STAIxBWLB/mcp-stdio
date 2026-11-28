@@ -4,6 +4,16 @@ All notable changes to `@staix/mcp-stdio` are recorded here. The format follows 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-28
+
+### Changed
+
+- The initialize-era `tools/list` metadata transcripts now expect a tool list for agent-mem, vault-mem, agent-research and agent-decide. Core transcripts cover integer and string progress tokens and rejection of non-object metadata.
+
+### Fixed
+
+- Initialize-era `tools/list` accepts plain-object `params._meta`, including the progress token sent by Codex (#13).
+
 ## [0.2.0] - 2026-11-26
 
 ### Added
@@ -47,6 +57,7 @@ First release: a zero-runtime-dependency MCP stdio server core for Bun 1.4.4 or 
 
 - 0.1.0 was published to npm from a local checkout, so it carries no provenance attestation. The tag-triggered workflow run stopped at publish because the version already existed; the registry tarball shasum `5668cc66acbd5eda3ebd55a376c7a223f40d472c` matches the one it built from the tag. Later versions publish through the workflow with npm trusted publishing.
 
-[Unreleased]: https://github.com/STAIxBWLB/mcp-stdio/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/STAIxBWLB/mcp-stdio/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/STAIxBWLB/mcp-stdio/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/STAIxBWLB/mcp-stdio/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/STAIxBWLB/mcp-stdio/releases/tag/v0.1.0
