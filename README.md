@@ -12,7 +12,7 @@ await serve({
 });
 ```
 
-`serve` accepts `instructions`, input/output streams, a close callback and limits for frame bytes, result bytes, default string length and individual tool frame bytes. Defaults are 64 KiB, 256 KiB and 64 KiB respectively. `failureText` can map a thrown error or `ResultTooLarge` to client-facing text. The consumer decides what is safe to disclose. The default response is opaque. `onEmitted` observes successful calls only after the output callback confirms the write.
+`serve` accepts `instructions`, input/output streams, a close callback and limits for frame bytes, result bytes, default string length and individual tool frame bytes. Defaults are 64 KiB, 256 KiB and 65,536 characters (UTF-16 code units) respectively. `failureText` can map a thrown error or `ResultTooLarge` to client-facing text. The consumer decides what is safe to disclose. The default response is opaque. `onEmitted` observes successful calls only after the output callback confirms the write.
 
 `validArguments(value, schema)` and `argumentError(value, schema)` validate the bounded schema vocabulary. `writeConfirmed(output, text)`, `PROTOCOL_VERSIONS`, `ERROR` and `ResultTooLarge` are also exported. `runTranscripts(options)` runs the shared protocol cases against the consumer tool table and the handler-dependent cases with fixture tools, retaining the consumer options. `runTranscripts(cases, options)` replays recorded input/output streams and returns exact comparison results.
 
@@ -37,7 +37,7 @@ Changes to the package follow these rules:
 
 ## Protocol negotiation
 
-`2025-11-25` is the preferred initialize-era revision. The server also negotiates `2025-06-18`, `2025-03-26`, and `2024-11-05` when requested. Under `2025-11-25`, arguments that fail a tool's input schema produce a tool result with `isError: true` and a text diagnostic ([SEP-1303](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#error-handling)). Unknown tools and malformed `tools/call` parameters use JSON-RPC `-32602`. Earlier negotiated revisions also use `-32602` for schema validation failures.
+`2025-11-25` is the preferred initialize-era revision. The server also negotiates `2025-06-18`, `2025-03-26`, and `2024-11-05` when requested. Under `2025-11-25`, arguments that fail a tool's input schema produce a tool result with `isError: true` and a text diagnostic ([SEP-1303](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#error-handling)). Unknown tools and malformed `tools/call` parameters use JSON-RPC `-32602`. Earlier negotiated revisions also use `-32602` for schema validation failures, and treat an explicit `arguments: null` as omitted arguments.
 
 | Revision | stdio entry | Schema validation failure |
 | --- | --- | --- |
@@ -45,7 +45,7 @@ Changes to the package follow these rules:
 | `2025-11-25` | `initialize` and `notifications/initialized` | Tool result with `isError: true` |
 | `2025-06-18`, `2025-03-26`, `2024-11-05` | `initialize` and `notifications/initialized` | JSON-RPC `-32602` |
 
-For `2026-07-28`, send `io.modelcontextprotocol/protocolVersion` and `io.modelcontextprotocol/clientCapabilities` in `params._meta` on every request. A missing required field yields `-32602`. An unsupported version yields `-32022` with the supported versions. `server/discover` and pre-initialize legacy `ping` leave the era undecided. The first initialize handshake or stateless operation selects the era for that stdio process. The stateless era has no `ping`; use `server/discover` to query server information.
+For `2026-07-28`, send `io.modelcontextprotocol/protocolVersion` and `io.modelcontextprotocol/clientCapabilities` in `params._meta` on every request. A request is stateless when its `_meta` carries either field or the process is already in the stateless era. Stateless requests are checked in this order. On a process already in the initialize era, the request gets `-32602` naming that era. An `initialize` request gets `-32601` naming the supported versions. A missing or malformed field (a version that is not a string, capabilities that are not an object) gets `-32602`. An unsupported version gets `-32022` with the supported versions. Before the era is decided, a request with neither field gets initialize-era handling: `initialize` and `ping` are answered, and any other request gets `-32002` until `notifications/initialized` follows a successful `initialize`. `server/discover` and pre-initialize legacy `ping` leave the era undecided. The first initialize handshake or stateless operation selects the era for that stdio process. The stateless era has no `ping`; use `server/discover` to query server information.
 
 Stateless results include `resultType: "complete"` and server identity in `_meta`. Discovery and tool listings default to `ttlMs: 0` and `cacheScope: "private"`. Set `listCache` to change those values for stateless `tools/list`.
 
