@@ -26,6 +26,15 @@ const failureText = (error: unknown) => error instanceof ToolRefusal
   : undefined;
 ```
 
+## Contract
+
+These rules hold for every change to the package:
+
+1. What `tools/list` advertises is what `tools/call` enforces. `serve` refuses at startup any schema the core would read differently from JSON Schema; this never surfaces at call time.
+2. A response depends only on the request and the negotiated protocol version. Behaviour added for a newer revision is gated on that revision, so a session on an older revision keeps byte-identical responses.
+3. Transcripts are per protocol version. Supporting a new MCP revision adds transcript files and never edits existing ones. Within a major version, an existing expected response changes only for a bug fix, which the CHANGELOG records.
+4. The API changes only additively. New `ServeOptions` and `Tool` fields are optional, and their defaults keep current behaviour.
+
 ## Protocol negotiation
 
 `2025-11-25` is the preferred initialize-era revision. The server also negotiates `2025-06-18`, `2025-03-26`, and `2024-11-05` when requested. Under `2025-11-25`, arguments that fail a tool's input schema produce a tool result with `isError: true` and a text diagnostic ([SEP-1303](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#error-handling)). Unknown tools and malformed `tools/call` parameters use JSON-RPC `-32602`. Earlier negotiated revisions also use `-32602` for schema validation failures.
