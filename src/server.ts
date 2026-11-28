@@ -90,12 +90,14 @@ export async function serve(options: ServeOptions): Promise<void> {
       await error(id, ERROR.INVALID_PARAMS, "This process is in the initialize era. Send initialize-era requests without stateless metadata, or start a new server process for stateless requests."); return;
     }
     const discover = msg.method === "server/discover";
-    if (modernRequest && !discover) stateless = true;
     const modern = modernRequest || stateless;
 
     if (modern) {
       if (msg.method === "initialize") {
-        await error(id, ERROR.METHOD_NOT_FOUND, `This process is in the stateless era. Supported stateless versions: ${STATELESS_VERSION}. Send stateless requests with _meta, or start a new server process to initialize.`);
+        const message = stateless
+          ? `This process is in the stateless era. Supported stateless versions: ${STATELESS_VERSION}. Send stateless requests with _meta, or start a new server process to initialize.`
+          : `Initialize requests cannot carry stateless metadata. Send initialize without stateless metadata, or send stateless requests with both ${VERSION_KEY} and ${CAPABILITIES_KEY} in _meta. Supported stateless versions: ${STATELESS_VERSION}.`;
+        await error(id, ERROR.METHOD_NOT_FOUND, message);
         return;
       }
       const requested = meta?.[VERSION_KEY];
@@ -123,6 +125,7 @@ export async function serve(options: ServeOptions): Promise<void> {
         }) });
         return;
       }
+      stateless = true;
     }
     if (!modern && msg.method === "ping") { await send({ jsonrpc: "2.0", id, result: {} }); return; }
     if (msg.method === "initialize") {
