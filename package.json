@@ -1,6 +1,6 @@
 {
   "name": "@staix/mcp-stdio",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Bounded MCP stdio server core for Bun",
   "type": "module",
   "repository": { "type": "git", "url": "git+https://github.com/STAIxBWLB/mcp-stdio.git" },
