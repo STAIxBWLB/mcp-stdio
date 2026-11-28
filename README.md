@@ -30,7 +30,7 @@ const failureText = (error: unknown) => error instanceof ToolRefusal
 
 Changes to the package follow these rules:
 
-1. `tools/call` validates arguments against the advertised `inputSchema` under the rules in Tool input schemas and the configured limits. `serve` refuses ambiguous schema forms at startup, so they never surface at call time.
+1. `tools/call` validates arguments against the advertised `inputSchema` under the rules in Tool input schemas and the configured limits. `serve` refuses the unsupported and malformed schema forms listed there at startup.
 2. Behaviour added for a newer protocol revision is gated on that revision. Sessions on older revisions keep their existing responses.
 3. Transcripts are per protocol version. Supporting a new MCP revision adds transcript files and leaves existing ones unchanged. An existing expected response changes only for a bug fix, which the CHANGELOG records and which is released under the versioning rule below.
 4. New `ServeOptions` and `Tool` fields are optional, and their defaults keep current behaviour. A breaking API change is released under the versioning rule below.
