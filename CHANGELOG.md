@@ -8,7 +8,7 @@ All notable changes to `@staix/mcp-stdio` are recorded here. The format follows 
 
 ### Changed
 
-- Stateless requests select the era only after their metadata passes validation, and discovery leaves the era undecided. Three new transcripts cover successful initialization after rejected requests.
+- Stateless requests select the era only after their metadata passes validation. Three new transcripts cover successful initialization after rejected requests.
 
 ### Fixed
 
